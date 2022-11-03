@@ -58,10 +58,10 @@ The following required Triton repositories will be pulled and used in
 the build. By default the "main" branch/tag will be used for each repo
 but the following CMake arguments can be used to override.
 
-* triton-inference-server/core: -DTRITON_CORE_REPO_TAG=[tag]
-* triton-inference-server/common: -DTRITON_COMMON_REPO_TAG=[tag]
+* triton-inference-server/core: `-D TRITON_CORE_REPO_TAG=[tag]`
+* triton-inference-server/common: `-D TRITON_COMMON_REPO_TAG=[tag]` 
 
-## Using the Checksum Repository Agent
+## Using the Cache 
 
 The cache is configured by a JSON file passed through the
 `tritonserver --cache-config config.json` CLI flag. The JSON
