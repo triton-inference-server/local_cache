@@ -12,6 +12,8 @@ struct CacheEntry {
 
 class LocalCache {
   public:
+    ~LocalCache();
+
     // Create the cache object
     static TRITONSERVER_Error* Create(uint64_t cache_size, std::unique_ptr<LocalCache>* cache);
 
