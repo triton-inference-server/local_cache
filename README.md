@@ -69,10 +69,9 @@ file is parsed by the Cache implementation, so the fields required
 are up to the cache implementer.
 
 This local cache implementation only expects a `cache_size` (in bytes)
-for example:
+in the config file. For example:
 
 ```
-# config.json
 {
   "cache_size": 4194304
 }
