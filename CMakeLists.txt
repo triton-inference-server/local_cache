@@ -73,6 +73,7 @@ configure_file(src/libtritoncache_local.ldscript libtritoncache_local.ldscript C
 
 add_library(
   triton-local-cache SHARED
+  src/cache_api.cc
   src/local_cache.cc
 )
 
