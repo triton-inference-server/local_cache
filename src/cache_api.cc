@@ -20,7 +20,8 @@ TRITONSERVER_Error*
 TRITONCACHE_CacheDelete(TRITONCACHE_Cache* cache)
 {
   if (cache == nullptr) {
-    return TRITONSERVER_ErrorNew(TRITONSERVER_ERROR_INVALID_ARG, "cache was nullptr");
+    return TRITONSERVER_ErrorNew(
+        TRITONSERVER_ERROR_INVALID_ARG, "cache was nullptr");
   }
 
   delete reinterpret_cast<LocalCache*>(cache);
@@ -28,11 +29,16 @@ TRITONCACHE_CacheDelete(TRITONCACHE_Cache* cache)
 }
 
 TRITONSERVER_Error*
-TRITONCACHE_CacheLookup(TRITONCACHE_Cache* cache, const char* key, void** entries, size_t** sizes, size_t* num_entries)
+TRITONCACHE_CacheLookup(
+    TRITONCACHE_Cache* cache, const char* key, TRITONCACHE_CacheEntry* entry)
 {
   // TODO
   if (cache == nullptr) {
-    return TRITONSERVER_ErrorNew(TRITONSERVER_ERROR_INVALID_ARG, "cache was nullptr");
+    return TRITONSERVER_ErrorNew(
+        TRITONSERVER_ERROR_INVALID_ARG, "cache was nullptr");
+  } else if (entry == nullptr) {
+    return TRITONSERVER_ErrorNew(
+        TRITONSERVER_ERROR_INVALID_ARG, "cache entry was nullptr");
   }
 
   auto lcache = reinterpret_cast<LocalCache*>(cache);
@@ -46,12 +52,21 @@ TRITONCACHE_CacheLookup(TRITONCACHE_Cache* cache, const char* key, void** entrie
   std::vector<size_t> lsizes;
   for (const auto& entry : lentries) {
     ldata.emplace_back(entry.data);
-    lsizes.emplace_back(entry.size); // TODO
+    lsizes.emplace_back(entry.size);  // TODO
   }
-  // TODO: lifetimes OK?
-  *num_entries = lentries.size();
-  *sizes = lsizes.data();
-  *entries = ldata.data();
+  // TODO: fix lifetimes here
+  auto num_items = lentries.size();
+  auto byte_sizes = lsizes.data();
+  auto items = ldata.data();
+  // TODO: Need to create entry here, or creating/passing entry from Triton is
+  // OK?
+  err = TRITONCACHE_CacheEntrySetItems(entry, items, byte_sizes, num_items);
+  if (err != nullptr) {
+    return err;
+  }
+
+  // TODO: Set tags if used at all too
+  // err = TRITONCACHE_CacheEntrySetTags(...)
 
   return nullptr;  // success
 }
