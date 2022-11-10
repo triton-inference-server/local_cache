@@ -42,24 +42,24 @@ TRITONCACHE_CacheLookup(
   }
 
   auto lcache = reinterpret_cast<LocalCache*>(cache);
-  std::vector<CacheEntry> lentries;
-  std::vector<void*> ldata;
-  auto err = lcache->Lookup(key, &lentries);
+  std::vector<const void*> ldata;
+  // TODO: Get reference to avoid copy, or
+  //       get copy to release lock early
+  auto [err, lentry] = lcache->Lookup(key);
   if (err != nullptr) {
     return err;
   }
 
   std::vector<size_t> lsizes;
-  for (const auto& entry : lentries) {
-    ldata.emplace_back(entry.data);
-    lsizes.emplace_back(entry.size);  // TODO
+  for (const auto& [data, tags] : lentry.items) {
+    ldata.emplace_back(data.data());
+    lsizes.emplace_back(data.size());  // TODO
   }
   // TODO: fix lifetimes here
-  auto num_items = lentries.size();
+  auto num_items = lentry.items.size();
   auto byte_sizes = lsizes.data();
   auto items = ldata.data();
-  // TODO: Need to create entry here, or creating/passing entry from Triton is
-  // OK?
+  // TODO: check
   err = TRITONCACHE_CacheEntrySetItems(entry, items, byte_sizes, num_items);
   if (err != nullptr) {
     return err;

@@ -26,7 +26,7 @@
 
 cmake_minimum_required(VERSION 3.17)
 project(tritonlocalcache LANGUAGES C CXX)
-set (CMAKE_CXX_STANDARD 20)
+set (CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 #
@@ -89,7 +89,7 @@ target_include_directories(
     ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
 
-target_compile_features(triton-local-cache PRIVATE cxx_std_20)
+target_compile_features(triton-local-cache PRIVATE cxx_std_17)
 target_compile_options(
   triton-local-cache PRIVATE
   $<$<OR:$<CXX_COMPILER_ID:Clang>,$<CXX_COMPILER_ID:AppleClang>,$<CXX_COMPILER_ID:GNU>>:
