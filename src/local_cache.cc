@@ -50,6 +50,7 @@ LocalCache::Lookup(const std::string& key)
     return {err, {}};
   }
   const auto entry = iter->second;
+  std::cout << "LocalCache::Lookup() finished for key: " << key << std::endl;
   return std::make_pair(nullptr, entry);  // success
 }
 
@@ -68,8 +69,8 @@ LocalCache::Insert(const std::string& key, const CacheEntry& entry)
   return nullptr;  // success
 }
 
-std::pair<TRITONSERVER_Error*, CacheEntry> LocalCache::EntryFromTriton(
-    TRITONCACHE_CacheEntry*)
+std::pair<TRITONSERVER_Error*, CacheEntry>
+LocalCache::EntryFromTriton(TRITONCACHE_CacheEntry*)
 {
   CacheEntry lentry;
   // TODO: Create internal entry from opaque triton entry through C APIs

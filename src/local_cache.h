@@ -6,12 +6,10 @@
 
 namespace triton { namespace cache { namespace local {
 
-using Data = std::vector<std::byte>;  // raw buffers
-using Tags = std::vector<std::string>;
-using Item = std::pair<Data, Tags>;
+using Buffer = std::vector<std::byte>;  // raw buffers
 
 struct CacheEntry {
-  std::vector<Item> items;
+  std::vector<Buffer> items_;
 };
 
 class LocalCache {
@@ -26,10 +24,9 @@ class LocalCache {
   // Return TRITONSERVER_Error* object indicating success or failure.
   std::pair<TRITONSERVER_Error*, CacheEntry> Lookup(const std::string& key);
 
-      // Insert entry into cache, evict entries to make space if necessary
-      // Return TRITONSERVER_Error* object indicating success or failure.
-      TRITONSERVER_Error* Insert(
-          const std::string& key, const CacheEntry& entry);
+  // Insert entry into cache, evict entries to make space if necessary
+  // Return TRITONSERVER_Error* object indicating success or failure.
+  TRITONSERVER_Error* Insert(const std::string& key, const CacheEntry& entry);
 
   // Checks if key exists in cache
   // Return true if key exists in cache, false otherwise.
