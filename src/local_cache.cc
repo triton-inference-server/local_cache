@@ -40,7 +40,8 @@ std::pair<TRITONSERVER_Error*, CacheEntry>
 LocalCache::Lookup(const std::string& key)
 {
   // TODO
-  std::cout << "LocalCache::Lookup() with key: " << key << std::endl;
+  std::cout << "[DEBUG] [local_cache.cc] LocalCache::Lookup() with key: " << key
+            << std::endl;
   // TODO: read-only lock
   const auto iter = map_.find(key);
   if (iter == map_.end()) {
@@ -50,7 +51,13 @@ LocalCache::Lookup(const std::string& key)
     return {err, {}};
   }
   const auto entry = iter->second;
-  std::cout << "LocalCache::Lookup() finished for key: " << key << std::endl;
+  // TODO: Remove
+  std::cout << "[DEBUG] [local_cache.cc] LocalCache::Lookup() FOUND key: "
+            << key << std::endl;
+  std::cout
+      << "[DEBUG] [local_cache.cc] LocalCache::Lookup entry.items_.size(): "
+      << entry.items_.size() << std::endl;
+  // TODO: Use std::optional instead
   return std::make_pair(nullptr, entry);  // success
 }
 
@@ -58,13 +65,26 @@ TRITONSERVER_Error*
 LocalCache::Insert(const std::string& key, const CacheEntry& entry)
 {
   // TODO
-  std::cout << "LocalCache::Insert() with key: " << key << std::endl;
+  std::cout << "[DEBUG] [local_cache.cc] LocalCache::Insert() with key: " << key
+            << std::endl;
   // TODO: read+write lock
   if (map_.find(key) != map_.end()) {
     return TRITONSERVER_ErrorNew(
         TRITONSERVER_ERROR_INTERNAL,
         std::string("key [" + key + "] already exists").c_str());
   }
+
+  // TODO: Remove
+  auto litems = entry.items_;
+  for (const auto& buffer : litems) {
+    std::cout << "[DEBUG] [local_cache.cc] [INSERT] buffer.size(): "
+              << buffer.size() << std::endl;
+    if (!buffer.size()) {
+      return TRITONSERVER_ErrorNew(
+          TRITONSERVER_ERROR_INTERNAL, "buffer size was zero");
+    }
+  }
+
   map_[key] = entry;
   return nullptr;  // success
 }

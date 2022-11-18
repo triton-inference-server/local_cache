@@ -1,4 +1,5 @@
-#include <iostream>  // TODO
+#include <boost/core/span.hpp>  // TODO: remove
+#include <iostream>             // TODO: remove
 #include "local_cache.h"
 #include "triton/core/tritoncache.h"
 #include "triton/core/tritonserver.h"
@@ -17,9 +18,10 @@ TRITONCACHE_CacheNew(
   }
   // TODO
   if (cache_config == nullptr) {
-    std::cout << "[DEBUG] [LocalCache::TRITONCACHE_CacheNew] cache_config NOT "
-                 "IMPLEMENTED YET"
-              << std::endl;
+    std::cout
+        << "[DEBUG] [cache_api.cc] [TRITONCACHE_CacheNew] cache_config NOT "
+           "IMPLEMENTED YET"
+        << std::endl;
   }
 
   // TODO: Parse cache config for size
@@ -61,13 +63,28 @@ TRITONCACHE_CacheLookup(
     return err;
   }
 
-  // TODO - class like core?
-  std::cout << "[DEBUG] Building TRITONCACHE_CacheEntry to return" << std::endl;
-  std::cout << "[DEBUG] lentry.items_.size(): " << lentry.items_.size()
-            << std::endl;
+  // TODO - cache entry class like core instead of struct?
+  std::cout
+      << "[DEBUG] [cache_api.cc] Building TRITONCACHE_CacheEntry to return"
+      << std::endl;
+  std::cout << "[DEBUG] [cache_api.cc] lentry.items_.size(): "
+            << lentry.items_.size() << std::endl;
   auto litems = lentry.items_;
   for (const auto& buffer : litems) {
-    std::cout << "buffer.size(): " << buffer.size() << std::endl;
+    std::cout << "[DEBUG] [cache_api.cc] [LOOKUP] buffer.size(): "
+              << buffer.size() << std::endl;
+    if (!buffer.size()) {
+      return TRITONSERVER_ErrorNew(
+          TRITONSERVER_ERROR_INTERNAL, "buffer size was zero");
+    }
+
+    // TODO: Remove
+    std::cout << "[DEBUG] [cache_api.cc] [LOOKUP] entry ints: ";
+    int* ibuffer = (int*)(buffer.data());
+    for (size_t i = 0; i < (buffer.size() / sizeof(int)); i++) {
+      std::cout << ibuffer[i] << " ";
+    }
+    std::cout << std::endl;
     // TODO: Use RETURN_IF_ERROR
     err = TRITONCACHE_CacheEntryAddItem(entry, buffer.data(), buffer.size());
     if (err != nullptr) {
@@ -98,17 +115,27 @@ TRITONCACHE_CacheInsert(
   if (err != nullptr) {
     return err;
   }
+  std::cout << "[DEBUG] [cache_api.cc] [INSERT] num_items " << num_items
+            << std::endl;
 
   CacheEntry lentry;
   for (size_t index = 0; index < num_items; index++) {
+    void* base = nullptr;
     size_t byte_size = 0;
-    std::vector<std::byte> buffer;
-    void* base = reinterpret_cast<void*>(buffer.data());
     auto err = TRITONCACHE_CacheEntryItem(entry, index, &base, &byte_size);
     if (err != nullptr) {
       return err;
     }
-    lentry.items_.emplace_back(buffer);
+    std::cout << "[DEBUG] [cache_api.cc] [INSERT] byte_size " << byte_size
+              << std::endl;
+    // TODO
+    if (!byte_size) {
+      return TRITONSERVER_ErrorNew(
+          TRITONSERVER_ERROR_INTERNAL, "buffer size was zero");
+    }
+
+    auto byte_base = reinterpret_cast<std::byte*>(base);
+    lentry.items_.emplace_back(byte_base, byte_base + byte_size);
   }
 
   const auto lcache = reinterpret_cast<LocalCache*>(cache);
