@@ -42,7 +42,7 @@ TRITONCACHE_CacheNew(
     return TRITONSERVER_ErrorNew(
         TRITONSERVER_ERROR_INVALID_ARG, "cache was nullptr");
   }
-  // TODO
+  // TODO: Parse cache config for size
   if (cache_config == nullptr) {
     std::cout
         << "[DEBUG] [cache_api.cc] [TRITONCACHE_CacheNew] cache_config NOT "
@@ -50,7 +50,6 @@ TRITONCACHE_CacheNew(
         << std::endl;
   }
 
-  // TODO: Parse cache config for size
   std::unique_ptr<LocalCache> lcache;
   constexpr auto cache_size = 4 * 1024 * 1024;  // 4 MB
   LocalCache::Create(cache_size, &lcache);
@@ -74,7 +73,6 @@ TRITONSERVER_Error*
 TRITONCACHE_CacheLookup(
     TRITONCACHE_Cache* cache, const char* key, TRITONCACHE_CacheEntry* entry)
 {
-  // TODO
   if (cache == nullptr) {
     return TRITONSERVER_ErrorNew(
         TRITONSERVER_ERROR_INVALID_ARG, "cache was nullptr");
@@ -89,14 +87,12 @@ TRITONCACHE_CacheLookup(
     return err;
   }
 
-  // TODO - cache entry class like core instead of struct?
   std::cout
       << "[DEBUG] [cache_api.cc] Building TRITONCACHE_CacheEntry to return"
       << std::endl;
   for (const auto& item : lentry.items_) {
     TRITONCACHE_CacheEntryItem* triton_item = nullptr;
     RETURN_IF_ERROR(TRITONCACHE_CacheEntryItemNew(&triton_item));
-    // TODO: buffer size == 10 and not 16 ?
     for (const auto& buffer : item.buffers_) {
       std::cout << "[DEBUG] [cache_api.cc] [LOOKUP] buffer.size(): "
                 << buffer.size() << std::endl;
@@ -112,9 +108,10 @@ TRITONCACHE_CacheLookup(
           triton_item, buffer.data(), buffer.size()));
     }
 
+    // Pass ownership of triton_item to Triton to avoid copy. Triton will
+    // be responsible for cleaning it up, so do not call CacheEntryItemDelete.
     RETURN_IF_ERROR(TRITONCACHE_CacheEntryAddItem(entry, triton_item));
-    RETURN_IF_ERROR(
-        TRITONCACHE_CacheEntryItemDelete(triton_item));  // TODO: check valid
+    // RETURN_IF_ERROR(TRITONCACHE_CacheEntryItemDelete(triton_item));
   }
 
   return nullptr;  // success
@@ -158,15 +155,14 @@ TRITONCACHE_CacheInsert(
           item, buffer_index, &base, &byte_size));
       std::cout << "[DEBUG] [cache_api.cc] [INSERT] byte_size " << byte_size
                 << std::endl;
-      // TODO
+      // TODO: Remove
       if (!byte_size) {
         return TRITONSERVER_ErrorNew(
             TRITONSERVER_ERROR_INTERNAL, "buffer size was zero");
       }
 
-      auto byte_base = reinterpret_cast<std::byte*>(base);
-
       // Copy triton contents into cache representation for cache to own
+      auto byte_base = reinterpret_cast<std::byte*>(base);
       litem.buffers_.emplace_back(byte_base, byte_base + byte_size);
     }
     lentry.items_.emplace_back(litem);
