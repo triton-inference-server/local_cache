@@ -81,7 +81,3 @@ With the above configuration, the cache will be initialized with
 a size of `cache_size` (in bytes). If this value is too large or too small,
 initialization may fail.
 
-## TODO
-
-- [ ] cmake dir/config required?
-- [ ] location of cmake ldscript in src/ vs in cmake/ ?

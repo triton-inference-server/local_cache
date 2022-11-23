@@ -112,5 +112,4 @@ LocalCache::EntryToTriton(const CacheEntry& entry)
   return std::make_pair(nullptr, lentry);  // success
 }
 
-
 }}}  // namespace triton::cache::local

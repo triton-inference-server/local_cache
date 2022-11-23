@@ -36,7 +36,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # projects included in this one by FetchContent.
 #
 set(TRITON_COMMON_REPO_TAG "main" CACHE STRING "Tag for triton-inference-server/common repo")
-# TODO: set default branch name to main
+# TODO: Set branch back to main when merged
 set(TRITON_CORE_REPO_TAG "rmccormick-cache-api" CACHE STRING "Tag for triton-inference-server/core repo")
 #set(TRITON_CORE_REPO_TAG "main" CACHE STRING "Tag for triton-inference-server/core repo")
 
@@ -73,7 +73,10 @@ configure_file(src/libtritoncache_local.ldscript libtritoncache_local.ldscript C
 
 add_library(
   triton-local-cache SHARED
+<<<<<<< HEAD
   src/cache_api.cc
+=======
+>>>>>>> 152dd4b81d6b910e4e0abc1b7f5ca67b5ebf9d33
   src/local_cache.cc
 )
 
