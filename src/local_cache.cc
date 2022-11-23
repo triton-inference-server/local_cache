@@ -76,12 +76,14 @@ LocalCache::Insert(const std::string& key, const CacheEntry& entry)
 
   // TODO: Remove
   auto litems = entry.items_;
-  for (const auto& buffer : litems) {
-    std::cout << "[DEBUG] [local_cache.cc] [INSERT] buffer.size(): "
-              << buffer.size() << std::endl;
-    if (!buffer.size()) {
-      return TRITONSERVER_ErrorNew(
-          TRITONSERVER_ERROR_INTERNAL, "buffer size was zero");
+  for (const auto& item : entry.items_) {
+    for (const auto& buffer : item.buffers_) {
+      std::cout << "[DEBUG] [local_cache.cc] [INSERT] buffer.size(): "
+                << buffer.size() << std::endl;
+      if (!buffer.size()) {
+        return TRITONSERVER_ErrorNew(
+            TRITONSERVER_ERROR_INTERNAL, "buffer size was zero");
+      }
     }
   }
 

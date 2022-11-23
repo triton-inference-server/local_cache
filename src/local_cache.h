@@ -8,8 +8,12 @@ namespace triton { namespace cache { namespace local {
 
 using Buffer = std::vector<std::byte>;  // raw buffers
 
+struct CacheEntryItem {
+  std::vector<Buffer> buffers_;
+};
+
 struct CacheEntry {
-  std::vector<Buffer> items_;
+  std::vector<CacheEntryItem> items_;
 };
 
 class LocalCache {
