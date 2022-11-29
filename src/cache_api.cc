@@ -169,8 +169,7 @@ TRITONCACHE_CacheInsert(
   }
 
   const auto lcache = reinterpret_cast<LocalCache*>(cache);
-  lcache->Insert(key, lentry);
-
+  RETURN_IF_ERROR(lcache->Insert(key, lentry));
   return nullptr;  // success
 }
 

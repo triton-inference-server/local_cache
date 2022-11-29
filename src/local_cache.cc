@@ -32,17 +32,20 @@ LocalCache::Exists(const std::string& key)
   // TODO: Can we allocate a map (ease of use) with a fixed size pool managed by
   // boost?
 
-  // TODO: read-only lock on map
+  // Read-only, can be shared
+  std::shared_lock lk(map_mu_);
   return map_.find(key) != map_.end();
 }
 
 std::pair<TRITONSERVER_Error*, CacheEntry>
 LocalCache::Lookup(const std::string& key)
 {
-  // TODO
+  // Read-only, can be shared
+  std::shared_lock lk(map_mu_);
+
+  // TODO: Remove
   std::cout << "[DEBUG] [local_cache.cc] LocalCache::Lookup() with key: " << key
             << std::endl;
-  // TODO: read-only lock
   const auto iter = map_.find(key);
   if (iter == map_.end()) {
     auto err = TRITONSERVER_ErrorNew(
@@ -57,17 +60,18 @@ LocalCache::Lookup(const std::string& key)
   std::cout
       << "[DEBUG] [local_cache.cc] LocalCache::Lookup entry.items_.size(): "
       << entry.items_.size() << std::endl;
-  // TODO: Use std::optional instead
   return std::make_pair(nullptr, entry);  // success
 }
 
 TRITONSERVER_Error*
 LocalCache::Insert(const std::string& key, const CacheEntry& entry)
 {
-  // TODO
+  // Read-write, cannot be shared
+  std::unique_lock lk(map_mu_);
+
+  // TODO: Remove
   std::cout << "[DEBUG] [local_cache.cc] LocalCache::Insert() with key: " << key
             << std::endl;
-  // TODO: read+write lock
   if (map_.find(key) != map_.end()) {
     return TRITONSERVER_ErrorNew(
         TRITONSERVER_ERROR_INTERNAL,
@@ -89,27 +93,6 @@ LocalCache::Insert(const std::string& key, const CacheEntry& entry)
 
   map_[key] = entry;
   return nullptr;  // success
-}
-
-std::pair<TRITONSERVER_Error*, CacheEntry>
-LocalCache::EntryFromTriton(TRITONCACHE_CacheEntry*)
-{
-  CacheEntry lentry;
-  // TODO: Create internal entry from opaque triton entry through C APIs
-  // items = TRITONCACHE_CacheEntryItems(...), tags =
-  // TRITONCACHE_CacheEntryTags(...)
-  return std::make_pair(nullptr, lentry);  // success
-}
-
-std::pair<TRITONSERVER_Error*, TRITONCACHE_CacheEntry*>
-LocalCache::EntryToTriton(const CacheEntry& entry)
-{
-  TRITONCACHE_CacheEntry* lentry = nullptr;
-  // TODO: Setup triton entry, TritonCacheEntryNew, SetItems, SetTags
-  // TODO: Create internal entry from opaque triton entry through C APIs
-  // items = TRITONCACHE_CacheEntryItems(...), tags =
-  // TRITONCACHE_CacheEntryTags(...)
-  return std::make_pair(nullptr, lentry);  // success
 }
 
 }}}  // namespace triton::cache::local

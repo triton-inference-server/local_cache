@@ -1,4 +1,5 @@
 #include <memory>
+#include <shared_mutex>
 #include <unordered_map>  // TODO
 #include <vector>
 #include "triton/core/tritoncache.h"
@@ -44,13 +45,9 @@ class LocalCache {
   // TODO
   LocalCache(uint64_t size);
 
-  // Helpers
-  std::pair<TRITONSERVER_Error*, TRITONCACHE_CacheEntry*> EntryToTriton(
-      const CacheEntry& entry);
-  std::pair<TRITONSERVER_Error*, CacheEntry> EntryFromTriton(
-      TRITONCACHE_CacheEntry* entry);
-
-  // TODO: map backed by boost buffer?
+  // Shared mutex to support read-only and read-write locks
+  std::shared_mutex map_mu_;
+  // TODO: map backed by boost buffer
   std::unordered_map<std::string, CacheEntry> map_;
 };
 
