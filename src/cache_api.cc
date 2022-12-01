@@ -20,7 +20,7 @@ printBytes(boost::span<const std::byte> buffer)
   std::ios oldState(nullptr);
   oldState.copyfmt(std::cout);
 
-  std::cout << "[DEBUG] [cache_api.cc] [LOOKUP] Buffer bytes: ";
+  std::cout << "[DEBUG] [cache_api.cc] Buffer bytes: ";
   for (const auto& byte : buffer) {
     std::cout << std::hex << "0x" << std::to_integer<int>(byte) << " ";
   }
@@ -151,9 +151,13 @@ TRITONCACHE_CacheInsert(
             TRITONSERVER_ERROR_INTERNAL, "buffer size was zero");
       }
 
+      // TODO: Keep this copy if removing copy from ItemGetBuffer API.
+      //       Shouldn't copy in both places.
       // Copy triton contents into cache representation for cache to own
       auto byte_base = reinterpret_cast<std::byte*>(base);
       litem.buffers_.emplace_back(byte_base, byte_base + byte_size);
+      // TODO: check memory leaks after optimizing copies
+      // delete base;
     }
     lentry.items_.emplace_back(litem);
   }
