@@ -58,7 +58,7 @@ LocalCache::Insert(const std::string& key, const CacheEntry& entry)
 
   if (map_.find(key) != map_.end()) {
     return TRITONSERVER_ErrorNew(
-        TRITONSERVER_ERROR_INTERNAL,
+        TRITONSERVER_ERROR_ALREADY_EXISTS,
         std::string("key [" + key + "] already exists").c_str());
   }
 
