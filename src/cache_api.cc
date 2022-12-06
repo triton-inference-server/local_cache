@@ -157,7 +157,7 @@ TRITONCACHE_CacheInsert(
       auto byte_base = reinterpret_cast<std::byte*>(base);
       litem.buffers_.emplace_back(byte_base, byte_base + byte_size);
       // TODO: check memory leaks after optimizing copies
-      // delete base;
+      delete byte_base;
     }
     lentry.items_.emplace_back(litem);
   }
