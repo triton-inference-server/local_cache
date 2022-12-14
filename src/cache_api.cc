@@ -63,8 +63,11 @@ TRITONCACHE_CacheLookup(
             TRITONSERVER_ERROR_INTERNAL, "buffer was null or size was zero");
       }
 
-      RETURN_IF_ERROR(
-          TRITONCACHE_CacheEntryItemAddBuffer(triton_item, buffer, byte_size));
+      // DLIS-2673: Add better memory_type support
+      TRITONSERVER_MemoryType memory_type = TRITONSERVER_MEMORY_CPU;
+      int64_t memory_type_id = 0;
+      RETURN_IF_ERROR(TRITONCACHE_CacheEntryItemAddBuffer(
+          triton_item, buffer, byte_size, memory_type, memory_type_id));
     }
 
     // Pass ownership of triton_item to Triton to avoid copy. Triton will
@@ -114,8 +117,20 @@ TRITONCACHE_CacheInsert(
     for (size_t buffer_index = 0; buffer_index < num_buffers; buffer_index++) {
       void* base = nullptr;
       size_t byte_size = 0;
+      TRITONSERVER_MemoryType memory_type = TRITONSERVER_MEMORY_CPU;
+      int64_t memory_type_id = 0;
       RETURN_IF_ERROR(TRITONCACHE_CacheEntryItemGetBuffer(
-          item, buffer_index, &base, &byte_size));
+          item, buffer_index, &base, &byte_size, &memory_type,
+          &memory_type_id));
+
+      // DLIS-2673: Add better memory_type support
+      if (memory_type != TRITONSERVER_MEMORY_CPU &&
+          memory_type != TRITONSERVER_MEMORY_CPU_PINNED) {
+        return TRITONSERVER_ErrorNew(
+            TRITONSERVER_ERROR_INVALID_ARG,
+            "Only input buffers in CPU memory are allowed in cache currently");
+      }
+
       if (!byte_size) {
         return TRITONSERVER_ErrorNew(
             TRITONSERVER_ERROR_INTERNAL, "buffer size was zero");
