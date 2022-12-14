@@ -123,16 +123,14 @@ LocalCache::Create(
 bool
 LocalCache::Exists(const std::string& key)
 {
-  // Read-only, can be shared
-  std::shared_lock lk(cache_mu_);
+  std::unique_lock lk(cache_mu_);
   return cache_.find(key) != cache_.end();
 }
 
 std::pair<TRITONSERVER_Error*, CacheEntry>
 LocalCache::Lookup(const std::string& key)
 {
-  // Read-only, can be shared
-  std::shared_lock lk(cache_mu_);
+  std::unique_lock lk(cache_mu_);
 
   auto iter = cache_.find(key);
   if (iter == cache_.end()) {
@@ -148,7 +146,6 @@ LocalCache::Lookup(const std::string& key)
 TRITONSERVER_Error*
 LocalCache::Insert(const std::string& key, CacheEntry& entry)
 {
-  // Read-write, cannot be shared
   std::unique_lock lk(cache_mu_);
 
   // TODO: probably a cleaner way to do this

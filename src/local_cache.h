@@ -1,7 +1,7 @@
 #include <boost/interprocess/managed_external_buffer.hpp>
 #include <list>
 #include <memory>
-#include <shared_mutex>
+#include <mutex>
 #include <unordered_map>
 #include <vector>
 #include "triton/core/tritoncache.h"
@@ -65,9 +65,8 @@ class LocalCache {
   void* buffer_;
   // Managed buffer
   boost::interprocess::managed_external_buffer managed_buffer_;
-  // Shared mutex to support read-only and read-write locks
-  std::shared_mutex cache_mu_;
-  std::shared_mutex buffer_mu_;
+  std::mutex cache_mu_;
+  std::mutex buffer_mu_;
   // key -> CacheEntry containing values and list iterator for LRU management
   std::unordered_map<std::string, CacheEntry> cache_;
   // List of keys sorted from most to least recently used
