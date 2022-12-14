@@ -102,6 +102,7 @@ target_link_libraries(
     triton-core-serverapi   # from repo-core
     triton-core-cacheapi    # from repo-core
     triton-core-serverstub  # from repo-core
+    triton-common-logging   # from repo-common
 )
 
 set_target_properties(
