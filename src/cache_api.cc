@@ -33,7 +33,7 @@ namespace triton { namespace cache { namespace local {
 extern "C" {
 
 TRITONSERVER_Error*
-TRITONCACHE_CacheNew(TRITONCACHE_Cache** cache, const char* cache_config)
+TRITONCACHE_CacheInitialize(TRITONCACHE_Cache** cache, const char* cache_config)
 {
   if (cache == nullptr) {
     return TRITONSERVER_ErrorNew(
@@ -51,7 +51,7 @@ TRITONCACHE_CacheNew(TRITONCACHE_Cache** cache, const char* cache_config)
 }
 
 TRITONSERVER_Error*
-TRITONCACHE_CacheDelete(TRITONCACHE_Cache* cache)
+TRITONCACHE_CacheFinalize(TRITONCACHE_Cache* cache)
 {
   if (cache == nullptr) {
     return TRITONSERVER_ErrorNew(
