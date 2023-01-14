@@ -122,17 +122,32 @@ TRITONSERVER_Error*
 LocalCache::Create(
     const std::string& cache_config, std::unique_ptr<LocalCache>* cache)
 {
+  LOG_VERBOSE(1) << "Initializing LocalCache with config: " << cache_config;
   rapidjson::Document document;
   document.Parse(cache_config.c_str());
-  if (!document.HasMember("size") || !document["size"].IsUint()) {
+  if (!document.HasMember("size")) {
     return TRITONSERVER_ErrorNew(
         TRITONSERVER_ERROR_INVALID_ARG,
         "Failed to initialize LocalCache: config didn't contain a valid 'size' "
         "field.");
   }
-  uint64_t cache_size = document["size"].GetUint64();
 
   try {
+    // Parse size field and validate typing
+    const auto& size_json = document["size"];
+    uint64_t cache_size = 0;
+    if (size_json.IsString()) {
+      auto size_str = size_json.GetString();
+      cache_size = std::stoull(size_str);
+    } else if (size_json.IsUint()) {
+      cache_size = size_json.GetUint();
+    } else {
+      return TRITONSERVER_ErrorNew(
+          TRITONSERVER_ERROR_INVALID_ARG,
+          "Failed to initialize LocalCache: 'size' config must be a string or "
+          "uint type");
+    }
+
     cache->reset(new LocalCache(cache_size));
   }
   catch (const std::exception& ex) {
