@@ -1,4 +1,4 @@
-# Copyright 2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# Copyright 2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions
@@ -36,9 +36,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # projects included in this one by FetchContent.
 #
 set(TRITON_COMMON_REPO_TAG "main" CACHE STRING "Tag for triton-inference-server/common repo")
-# TODO: Set branch back to main when merged
-set(TRITON_CORE_REPO_TAG "rmccormick-cache-api" CACHE STRING "Tag for triton-inference-server/core repo")
-#set(TRITON_CORE_REPO_TAG "main" CACHE STRING "Tag for triton-inference-server/core repo")
+set(TRITON_CORE_REPO_TAG "main" CACHE STRING "Tag for triton-inference-server/core repo")
 
 if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE Release)
@@ -73,6 +71,7 @@ configure_file(src/libtritoncache_local.ldscript libtritoncache_local.ldscript C
 
 add_library(
   triton-local-cache SHARED
+  src/cache_api.cc
   src/local_cache.cc
 )
 
@@ -101,8 +100,10 @@ target_link_libraries(
     triton-core-serverapi   # from repo-core
     triton-core-cacheapi    # from repo-core
     triton-core-serverstub  # from repo-core
+    triton-common-logging   # from repo-common
 )
 
+# TODO: Windows support
 set_target_properties(
   triton-local-cache PROPERTIES
   POSITION_INDEPENDENT_CODE ON
