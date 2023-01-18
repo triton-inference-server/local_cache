@@ -1,4 +1,4 @@
-# Copyright 2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# Copyright 2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions
@@ -112,6 +112,7 @@ target_link_libraries(
     triton-common-logging   # from repo-common
 )
 
+# TODO: Windows support
 set_target_properties(
   triton-local-cache PROPERTIES
   POSITION_INDEPENDENT_CODE ON

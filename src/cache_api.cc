@@ -1,3 +1,29 @@
+// Copyright 2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+//
+// Redistribution and use in source and binary forms, with or without
+// modification, are permitted provided that the following conditions
+// are met:
+//  * Redistributions of source code must retain the above copyright
+//    notice, this list of conditions and the following disclaimer.
+//  * Redistributions in binary form must reproduce the above copyright
+//    notice, this list of conditions and the following disclaimer in the
+//    documentation and/or other materials provided with the distribution.
+//  * Neither the name of NVIDIA CORPORATION nor the names of its
+//    contributors may be used to endorse or promote products derived
+//    from this software without specific prior written permission.
+//
+// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS ``AS IS'' AND ANY
+// EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+// IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+// PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT OWNER OR
+// CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
+// EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+// PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
+// PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY
+// OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+// (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
 #include "local_cache.h"
 #include "triton/core/tritoncache.h"
 #include "triton/core/tritonserver.h"
@@ -7,7 +33,7 @@ namespace triton { namespace cache { namespace local {
 extern "C" {
 
 TRITONSERVER_Error*
-TRITONCACHE_CacheNew(TRITONCACHE_Cache** cache, const char* cache_config)
+TRITONCACHE_CacheInitialize(TRITONCACHE_Cache** cache, const char* cache_config)
 {
   if (cache == nullptr) {
     return TRITONSERVER_ErrorNew(
@@ -25,7 +51,7 @@ TRITONCACHE_CacheNew(TRITONCACHE_Cache** cache, const char* cache_config)
 }
 
 TRITONSERVER_Error*
-TRITONCACHE_CacheDelete(TRITONCACHE_Cache* cache)
+TRITONCACHE_CacheFinalize(TRITONCACHE_Cache* cache)
 {
   if (cache == nullptr) {
     return TRITONSERVER_ErrorNew(
@@ -63,11 +89,21 @@ TRITONCACHE_CacheLookup(
             TRITONSERVER_ERROR_INTERNAL, "buffer was null or size was zero");
       }
 
-      // DLIS-2673: Add better memory_type support
-      TRITONSERVER_MemoryType memory_type = TRITONSERVER_MEMORY_CPU;
-      int64_t memory_type_id = 0;
+      // Create and set buffer attributes
+      // DLIS-2673: Add better memory_type support, default to CPU memory for
+      // now
+      TRITONSERVER_BufferAttributes* buffer_attributes = nullptr;
+      RETURN_IF_ERROR(TRITONSERVER_BufferAttributesNew(&buffer_attributes));
+      RETURN_IF_ERROR(TRITONSERVER_BufferAttributesSetByteSize(
+          buffer_attributes, byte_size));
+      RETURN_IF_ERROR(TRITONSERVER_BufferAttributesSetMemoryType(
+          buffer_attributes, TRITONSERVER_MEMORY_CPU));
+      RETURN_IF_ERROR(
+          TRITONSERVER_BufferAttributesSetMemoryTypeId(buffer_attributes, 0));
+      // Add buffer then clean up
       RETURN_IF_ERROR(TRITONCACHE_CacheEntryItemAddBuffer(
-          triton_item, buffer, byte_size, memory_type, memory_type_id));
+          triton_item, buffer, buffer_attributes));
+      RETURN_IF_ERROR(TRITONSERVER_BufferAttributesDelete(buffer_attributes));
     }
 
     // Pass ownership of triton_item to Triton to avoid copy. Triton will
@@ -115,13 +151,25 @@ TRITONCACHE_CacheInsert(
     // Form cache representation of CacheEntryItem from Triton
     CacheEntryItem litem;
     for (size_t buffer_index = 0; buffer_index < num_buffers; buffer_index++) {
+      // Get buffer and its buffer attributes from Triton
       void* base = nullptr;
+      TRITONSERVER_BufferAttributes* buffer_attributes = nullptr;
+      RETURN_IF_ERROR(TRITONSERVER_BufferAttributesNew(&buffer_attributes));
+      RETURN_IF_ERROR(TRITONCACHE_CacheEntryItemGetBuffer(
+          item, buffer_index, &base, buffer_attributes));
+
+      // Query buffer attributes then clean up
       size_t byte_size = 0;
       TRITONSERVER_MemoryType memory_type = TRITONSERVER_MEMORY_CPU;
       int64_t memory_type_id = 0;
-      RETURN_IF_ERROR(TRITONCACHE_CacheEntryItemGetBuffer(
-          item, buffer_index, &base, &byte_size, &memory_type,
-          &memory_type_id));
+
+      RETURN_IF_ERROR(
+          TRITONSERVER_BufferAttributesByteSize(buffer_attributes, &byte_size));
+      RETURN_IF_ERROR(TRITONSERVER_BufferAttributesMemoryType(
+          buffer_attributes, &memory_type));
+      RETURN_IF_ERROR(TRITONSERVER_BufferAttributesMemoryTypeId(
+          buffer_attributes, &memory_type_id));
+      RETURN_IF_ERROR(TRITONSERVER_BufferAttributesDelete(buffer_attributes));
 
       // DLIS-2673: Add better memory_type support
       if (memory_type != TRITONSERVER_MEMORY_CPU &&
