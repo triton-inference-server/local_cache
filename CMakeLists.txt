@@ -102,6 +102,13 @@ if(${TRITON_ENABLE_METRICS})
   )
 endif() # TRITON_ENABLE_METRICS
 
+if(${TRITON_ENABLE_LOGGING})
+  target_compile_definitions(
+    triton-local-cache
+    PRIVATE TRITON_ENABLE_LOGGING=1
+  )
+endif() # TRITON_ENABLE_LOGGING
+
 target_link_libraries(
   triton-local-cache
   PRIVATE

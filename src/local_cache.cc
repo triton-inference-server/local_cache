@@ -36,6 +36,7 @@ constexpr bool metrics_enabled = false;
 #endif
 
 namespace helpers {
+
 std::string
 PointerToString(void* ptr)
 {
@@ -43,6 +44,35 @@ PointerToString(void* ptr)
   ss << ptr;
   return ss.str();
 }
+
+uint64_t
+CaptureTimeUs()
+{
+  return std::chrono::duration_cast<std::chrono::microseconds>(
+             std::chrono::steady_clock::now().time_since_epoch())
+      .count();
+}
+
+class ScopedTimer {
+ public:
+  explicit ScopedTimer(uint64_t& duration) : duration_(duration)
+  {
+    start_ = CaptureTimeUs();
+  }
+
+  ~ScopedTimer()
+  {
+    end_ = CaptureTimeUs();
+    duration_ += (end_ - start_);
+  }
+
+ private:
+  uint64_t start_ = 0;
+  uint64_t end_ = 0;
+  // Reference passed to update existing variable
+  uint64_t& duration_;
+};
+
 }  // namespace helpers
 
 namespace triton { namespace cache { namespace local {
@@ -79,6 +109,13 @@ LocalCache::LocalCache(uint64_t size)
 
 LocalCache::~LocalCache()
 {
+  LOG_INFO << "Cleaning up LocalCache";
+  // Signal metrics thread to exit and wait for it
+  if (metrics_thread_ != nullptr) {
+    metrics_thread_exit_.store(true);
+    metrics_thread_->join();
+  }
+
   // Deallocate each chunk from managed buffer
   for (auto& iter : cache_) {
     auto& entry = iter.second;
@@ -100,12 +137,6 @@ LocalCache::~LocalCache()
   // Free total cache buffer
   if (buffer_ != nullptr) {
     free(buffer_);
-  }
-
-  // Signal metrics thread to exit and wait for it
-  if (metrics_thread_ != nullptr) {
-    metrics_thread_exit_.store(true);
-    metrics_thread_->join();
   }
 }
 
@@ -145,7 +176,7 @@ TRITONSERVER_Error*
 LocalCache::Create(
     const std::string& cache_config, std::unique_ptr<LocalCache>* cache)
 {
-  LOG_VERBOSE(1) << "Initializing LocalCache with config: " << cache_config;
+  LOG_INFO << "Initializing LocalCache with config: " << cache_config;
   rapidjson::Document document;
   document.Parse(cache_config.c_str());
   if (!document.HasMember("size")) {
@@ -195,6 +226,8 @@ std::pair<TRITONSERVER_Error*, CacheEntry>
 LocalCache::Lookup(const std::string& key)
 {
   std::unique_lock lk(cache_mu_);
+  // total_lookup_latency must be protected by mutex
+  helpers::ScopedTimer timer(total_lookup_latency_us_);
   num_lookups_++;  // must be protected
 
   auto iter = cache_.find(key);
@@ -215,6 +248,8 @@ TRITONSERVER_Error*
 LocalCache::Insert(const std::string& key, CacheEntry& entry)
 {
   std::unique_lock lk(cache_mu_);
+  // total_insertion_latency must be protected by mutex
+  helpers::ScopedTimer timer(total_insertion_latency_us_);
 
   // Check that sum of entry sizes does not exceed total available cache size
   {
@@ -374,7 +409,12 @@ LocalCache::InitMetrics()
     while (!metrics_thread_exit_.load()) {
       std::this_thread::sleep_for(
           std::chrono::milliseconds(metrics_interval_ms_));
-      UpdateMetrics();
+      // An error is not expected here, but log the error if it occurs
+      auto err = UpdateMetrics();
+      if (err != nullptr) {
+        LOG_ERROR << TRITONSERVER_ErrorMessage(err);
+        TRITONSERVER_ErrorDelete(err);
+      }
     }
   }));
 
@@ -402,8 +442,8 @@ LocalCache::UpdateMetrics()
     RETURN_IF_ERROR(cache_misses_.Set(num_misses_));
     RETURN_IF_ERROR(cache_lookups_.Set(num_lookups_));
     RETURN_IF_ERROR(cache_evictions_.Set(num_evictions_));
-    RETURN_IF_ERROR(cache_lookup_time_.Set(0));
-    RETURN_IF_ERROR(cache_insert_time_.Set(0));
+    RETURN_IF_ERROR(cache_lookup_time_.Set(total_lookup_latency_us_));
+    RETURN_IF_ERROR(cache_insert_time_.Set(total_insertion_latency_us_));
   }
 
   return nullptr;  // success

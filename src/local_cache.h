@@ -74,6 +74,10 @@ struct TritonMetric {
 
   TRITONSERVER_Error* Set(double value)
   {
+    if (!metric_) {
+      return TRITONSERVER_ErrorNew(
+          TRITONSERVER_ERROR_INTERNAL, "metric was nullptr");
+    }
     RETURN_IF_ERROR(TRITONSERVER_MetricSet(metric_, value));
     return nullptr;  // success
   }
@@ -134,8 +138,9 @@ class LocalCache {
   uint64_t num_lookups_ = 0;
   uint64_t num_hits_ = 0;
   uint64_t num_misses_ = 0;
-  uint64_t total_lookup_latency_ns_ = 0;
-  uint64_t total_insertion_latency_ns_ = 0;
+  // Lookup/Insert latencies in microseconds
+  uint64_t total_lookup_latency_us_ = 0;
+  uint64_t total_insertion_latency_us_ = 0;
   // TRITONSERVER_Metric/Family wrappers
   TritonMetric cache_util_;
   TritonMetric cache_entries_;
