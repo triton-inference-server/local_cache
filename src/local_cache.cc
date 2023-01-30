@@ -29,7 +29,14 @@
 #include "rapidjson/document.h"
 #include "triton/common/logging.h"
 
+#ifdef TRITON_ENABLE_METRICS
+constexpr bool metrics_enabled = true;
+#else
+constexpr bool metrics_enabled = false;
+#endif
+
 namespace helpers {
+
 std::string
 PointerToString(void* ptr)
 {
@@ -37,6 +44,35 @@ PointerToString(void* ptr)
   ss << ptr;
   return ss.str();
 }
+
+uint64_t
+CaptureTimeUs()
+{
+  return std::chrono::duration_cast<std::chrono::microseconds>(
+             std::chrono::steady_clock::now().time_since_epoch())
+      .count();
+}
+
+class ScopedTimer {
+ public:
+  explicit ScopedTimer(uint64_t& duration) : duration_(duration)
+  {
+    start_ = CaptureTimeUs();
+  }
+
+  ~ScopedTimer()
+  {
+    end_ = CaptureTimeUs();
+    duration_ += (end_ - start_);
+  }
+
+ private:
+  uint64_t start_ = 0;
+  uint64_t end_ = 0;
+  // Reference passed to update existing variable
+  uint64_t& duration_;
+};
+
 }  // namespace helpers
 
 namespace triton { namespace cache { namespace local {
@@ -58,11 +94,28 @@ LocalCache::LocalCache(uint64_t size)
 
   LOG_INFO << "Response Cache is created at '"
            << helpers::PointerToString(buffer_) << "' with size " << size;
+
+  // Metrics
+  if (metrics_enabled) {
+    auto err = InitMetrics();
+    if (err != nullptr) {
+      LOG_ERROR << "Failed to initialize metrics: "
+                << TRITONSERVER_ErrorMessage(err);
+    }
+  }
+
   return;
 }
 
 LocalCache::~LocalCache()
 {
+  LOG_INFO << "Cleaning up LocalCache";
+  // Signal metrics thread to exit and wait for it
+  if (metrics_thread_ != nullptr) {
+    metrics_thread_exit_.store(true);
+    metrics_thread_->join();
+  }
+
   // Deallocate each chunk from managed buffer
   for (auto& iter : cache_) {
     auto& entry = iter.second;
@@ -90,6 +143,10 @@ LocalCache::~LocalCache()
 TRITONSERVER_Error*
 LocalCache::Allocate(uint64_t byte_size, void** buffer)
 {
+  // NOTE: Could have more fine-grained locking, or remove Evict()
+  //       from this function and call separately
+  std::unique_lock lk(buffer_mu_);
+
   // Requested buffer larger than total buffer
   if (byte_size > managed_buffer_.get_size()) {
     return TRITONSERVER_ErrorNew(
@@ -102,9 +159,6 @@ LocalCache::Allocate(uint64_t byte_size, void** buffer)
   }
   // Attempt to allocate buffer from current available space
   void* lbuffer = nullptr;
-  // TODO: more fine-grained locking, or remove Evict()
-  //       from this function and call separately
-  std::unique_lock lk(buffer_mu_);
   while (!lbuffer) {
     lbuffer = managed_buffer_.allocate(byte_size, std::nothrow_t{});
     // There wasn't enough available space, so evict and try again
@@ -122,7 +176,7 @@ TRITONSERVER_Error*
 LocalCache::Create(
     const std::string& cache_config, std::unique_ptr<LocalCache>* cache)
 {
-  LOG_VERBOSE(1) << "Initializing LocalCache with config: " << cache_config;
+  LOG_INFO << "Initializing LocalCache with config: " << cache_config;
   rapidjson::Document document;
   document.Parse(cache_config.c_str());
   if (!document.HasMember("size")) {
@@ -172,14 +226,20 @@ std::pair<TRITONSERVER_Error*, CacheEntry>
 LocalCache::Lookup(const std::string& key)
 {
   std::unique_lock lk(cache_mu_);
+  // total_lookup_latency must be protected by mutex
+  helpers::ScopedTimer timer(total_lookup_latency_us_);
+  num_lookups_++;  // must be protected
 
   auto iter = cache_.find(key);
   if (iter == cache_.end()) {
+    num_misses_++;  // must be protected
     auto err = TRITONSERVER_ErrorNew(
         TRITONSERVER_ERROR_NOT_FOUND,
         std::string("key [" + key + "] does not exist").c_str());
     return {err, {}};
   }
+
+  num_hits_++;  // must be protected
   UpdateLRU(iter);
   return std::make_pair(nullptr, iter->second);  // success
 }
@@ -188,8 +248,39 @@ TRITONSERVER_Error*
 LocalCache::Insert(const std::string& key, CacheEntry& entry)
 {
   std::unique_lock lk(cache_mu_);
+  // total_insertion_latency must be protected by mutex
+  helpers::ScopedTimer timer(total_insertion_latency_us_);
 
-  // TODO: probably a cleaner way to do this
+  // Check that sum of entry sizes does not exceed total available cache size
+  {
+    std::unique_lock lk(buffer_mu_);
+    uint64_t total_entry_size = 0;
+    for (auto& item : entry.items_) {
+      for (auto& [base, byte_size] : item.buffers_) {
+        total_entry_size += byte_size;
+      }
+    }
+    if (total_entry_size > managed_buffer_.get_size()) {
+      return TRITONSERVER_ErrorNew(
+          TRITONSERVER_ERROR_INTERNAL,
+          std::string(
+              "Requested byte_size: " + std::to_string(total_entry_size) +
+              " is greater than total cache size: " +
+              std::to_string(managed_buffer_.get_size()))
+              .c_str());
+    }
+  }
+
+  // Exit early if key already exists to avoid setting up entry unnecessarily
+  if (cache_.find(key) != cache_.end()) {
+    return TRITONSERVER_ErrorNew(
+        TRITONSERVER_ERROR_ALREADY_EXISTS,
+        std::string("Insert failed, key [" + key + "] already exists in cache")
+            .c_str());
+  }
+
+  // Allocate and copy into a chunk from managed buffer for each item in entry
+  // NOTE: probably a cleaner way to do this
   for (auto& item : entry.items_) {
     for (auto& [base, byte_size] : item.buffers_) {
       // Copy triton contents into cache representation for cache to own
@@ -210,7 +301,6 @@ LocalCache::Insert(const std::string& key, CacheEntry& entry)
         std::string("Failed to insert key [" + key + "] into map").c_str());
   }
   UpdateLRU(iter);
-
   return nullptr;  // success
 }
 
@@ -219,7 +309,6 @@ LocalCache::Evict()
 {
   // NOTE: Unique lock on cache and buffer mutexes must be held for this
   // function
-
   // Nothing to evict if cache is empty
   if (cache_.size() == 0) {
     return TRITONSERVER_ErrorNew(
@@ -256,7 +345,8 @@ LocalCache::Evict()
   // Remove LRU key from LRU list
   lru_.pop_back();
 
-  return nullptr;  // success
+  num_evictions_++;  // must be protected
+  return nullptr;    // success
 }
 
 // Helpers
@@ -277,6 +367,103 @@ LocalCache::UpdateLRU(
   lru_.push_front(key);
   // Set CacheEntry LRU iterator to new LRU key location
   cache_entry.lru_iter_ = lru_.begin();
+}
+
+
+// Cache Metric Helpers: these must be protected when accessed
+TRITONSERVER_Error*
+LocalCache::InitMetrics()
+{
+  if (!metrics_enabled) {
+    return TRITONSERVER_ErrorNew(
+        TRITONSERVER_ERROR_UNSUPPORTED, "metrics not supported");
+  }
+
+  // Initialize Triton cache metrics
+  const TRITONSERVER_MetricKind kind = TRITONSERVER_METRIC_KIND_GAUGE;
+  RETURN_IF_ERROR(
+      cache_util_.Init(kind, "nv_cache_util", "Cache utilization [0.0 - 1.0]"));
+  RETURN_IF_ERROR(cache_entries_.Init(
+      kind, "nv_cache_num_entries",
+      "Number of responses stored in response cache"));
+  RETURN_IF_ERROR(cache_hits_.Init(
+      kind, "nv_cache_num_hits", "Number of cache hits in response cache"));
+  RETURN_IF_ERROR(cache_misses_.Init(
+      kind, "nv_cache_num_misses", "Number of cache misses in response cache"));
+  RETURN_IF_ERROR(cache_lookups_.Init(
+      kind, "nv_cache_num_lookups",
+      "Number of cache lookups in response cache"));
+  RETURN_IF_ERROR(cache_evictions_.Init(
+      kind, "nv_cache_num_evictions",
+      "Number of cache evictions in response cache"));
+  RETURN_IF_ERROR(cache_lookup_time_.Init(
+      kind, "nv_cache_lookup_duration",
+      "Total cache lookup duration (hit and miss), in microseconds"));
+  RETURN_IF_ERROR(cache_insert_time_.Init(
+      kind, "nv_cache_insertion_duration",
+      "Total cache insertion duration, in microseconds"));
+
+  // Start thread that polls metrics at an interval
+  metrics_thread_exit_.store(false);
+  metrics_thread_.reset(new std::thread([this] {
+    while (!metrics_thread_exit_.load()) {
+      std::this_thread::sleep_for(
+          std::chrono::milliseconds(metrics_interval_ms_));
+      // An error is not expected here, but log the error if it occurs
+      auto err = UpdateMetrics();
+      if (err != nullptr) {
+        LOG_ERROR << TRITONSERVER_ErrorMessage(err);
+        TRITONSERVER_ErrorDelete(err);
+      }
+    }
+  }));
+
+  return nullptr;  // success
+}
+
+
+TRITONSERVER_Error*
+LocalCache::UpdateMetrics()
+{
+  if (!metrics_enabled) {
+    return TRITONSERVER_ErrorNew(
+        TRITONSERVER_ERROR_UNSUPPORTED, "metrics not supported");
+  }
+
+  // Query and update cache metrics
+  {
+    std::unique_lock clk(cache_mu_);
+    {
+      std::unique_lock blk(buffer_mu_);
+      RETURN_IF_ERROR(cache_util_.Set(TotalUtilization()));
+    }
+    RETURN_IF_ERROR(cache_entries_.Set(NumEntries()));
+    RETURN_IF_ERROR(cache_hits_.Set(num_hits_));
+    RETURN_IF_ERROR(cache_misses_.Set(num_misses_));
+    RETURN_IF_ERROR(cache_lookups_.Set(num_lookups_));
+    RETURN_IF_ERROR(cache_evictions_.Set(num_evictions_));
+    RETURN_IF_ERROR(cache_lookup_time_.Set(total_lookup_latency_us_));
+    RETURN_IF_ERROR(cache_insert_time_.Set(total_insertion_latency_us_));
+  }
+
+  return nullptr;  // success
+}
+
+uint64_t
+LocalCache::NumEntries()
+{
+  // Must hold buffer_mu_ to safely access this
+  return cache_.size();
+}
+
+// Returns fraction of bytes allocated over total cache size between [0, 1]
+double
+LocalCache::TotalUtilization()
+{
+  // Must hold buffer_mu_ to safely access this
+  const auto total = managed_buffer_.get_size();
+  const auto used = total - managed_buffer_.get_free_memory();
+  return static_cast<double>(used) / static_cast<double>(total);
 }
 
 }}}  // namespace triton::cache::local

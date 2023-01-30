@@ -31,8 +31,8 @@
 # Triton Local Cache
 
 This repo contains an example 
-[cache](https://github.com/triton-inference-server/core/blob/main/include/triton/core/tritoncache.h)
-for caching data locally in-memory.
+[TRITONCACHE API](https://github.com/triton-inference-server/core/blob/main/include/triton/core/tritoncache.h)
+implementation for caching data locally in-memory.
 
 Ask questions or report problems in the main Triton [issues
 page](https://github.com/triton-inference-server/server/issues).
@@ -42,7 +42,7 @@ page](https://github.com/triton-inference-server/server/issues).
 Use a recent cmake to build. First install the required dependencies.
 
 ```
-$ apt-get install libboost-dev
+$ apt-get install libboost-dev rapidjson-dev
 ```
 
 To build the cache:
@@ -61,23 +61,16 @@ but the following CMake arguments can be used to override.
 * triton-inference-server/core: `-D TRITON_CORE_REPO_TAG=[tag]`
 * triton-inference-server/common: `-D TRITON_COMMON_REPO_TAG=[tag]` 
 
-## Using the Cache 
+## Configuring the Cache 
 
-The cache is configured by a JSON file passed through the
-`tritonserver --cache-config config.json` CLI flag. The JSON
-file is parsed by the Cache implementation, so the fields required
-are up to the cache implementer.
+Like other `TRITONCACHE` implementations, this cache is configured through the 
+`tritonserver --cache-config` CLI arg or through the 
+`TRITONSERVER_SetCacheConfig` API.
 
-This local cache implementation only expects a `cache_size` (in bytes)
-in the config file. For example:
-
-```
-{
-  "cache_size": 4194304
-}
-```
-
-With the above configuration, the cache will be initialized with
-a size of `cache_size` (in bytes). If this value is too large or too small,
-initialization may fail.
+Currently, the following config fields are supported:
+- `size`: The fixed size (in bytes) of CPU memory allocated to the cache 
+upfront. If this value is too large (ex: greater than available memory) or 
+too small (ex: smaller than required overhead such as ~1-2 KB), initialization
+may fail.
+    - example: `tritonserver --cache-config local,size=1048576`
 

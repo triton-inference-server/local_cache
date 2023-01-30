@@ -37,6 +37,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 #
 set(TRITON_COMMON_REPO_TAG "main" CACHE STRING "Tag for triton-inference-server/common repo")
 set(TRITON_CORE_REPO_TAG "main" CACHE STRING "Tag for triton-inference-server/core repo")
+option(TRITON_ENABLE_METRICS "Include metrics support in cache" ON)
 
 if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE Release)
@@ -93,6 +94,20 @@ target_compile_options(
   $<$<OR:$<CXX_COMPILER_ID:Clang>,$<CXX_COMPILER_ID:AppleClang>,$<CXX_COMPILER_ID:GNU>>:
     -Wall -Wextra -Wno-unused-parameter -Wno-type-limits -Werror>
 )
+
+if(${TRITON_ENABLE_METRICS})
+  target_compile_definitions(
+    triton-local-cache
+    PRIVATE TRITON_ENABLE_METRICS=1
+  )
+endif() # TRITON_ENABLE_METRICS
+
+if(${TRITON_ENABLE_LOGGING})
+  target_compile_definitions(
+    triton-local-cache
+    PRIVATE TRITON_ENABLE_LOGGING=1
+  )
+endif() # TRITON_ENABLE_LOGGING
 
 target_link_libraries(
   triton-local-cache
