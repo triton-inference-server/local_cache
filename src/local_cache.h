@@ -52,13 +52,8 @@ using Buffer = std::pair<void*, TRITONSERVER_BufferAttributes*>;
 TRITONSERVER_Error* CopyAttributes(
     TRITONSERVER_BufferAttributes* in, TRITONSERVER_BufferAttributes* out);
 
-struct CacheEntryItem {
-  std::vector<Buffer> buffers_;
-  TRITONCACHE_CacheEntryItem* triton_item_;
-};
-
 struct CacheEntry {
-  std::vector<CacheEntryItem> items_;
+  std::vector<Buffer> buffers_;
   // Point to key in LRU list for maintaining LRU order
   std::list<std::string>::iterator lru_iter_;
   TRITONCACHE_CacheEntry* triton_entry_;

@@ -105,61 +105,49 @@ TRITONCACHE_CacheInsert(
         (std::string("key '") + key + std::string("' already exists")).c_str());
   }
 
-  size_t num_items = 0;
-  RETURN_IF_ERROR(TRITONCACHE_CacheEntryItemCount(entry, &num_items));
+  size_t num_buffers = 0;
+  RETURN_IF_ERROR(TRITONCACHE_CacheEntryBufferCount(entry, &num_buffers));
 
   // Form cache representation of CacheEntry from Triton
   CacheEntry lentry;
   lentry.triton_entry_ = entry;
-  for (size_t item_index = 0; item_index < num_items; item_index++) {
-    TRITONCACHE_CacheEntryItem* item = nullptr;
-    RETURN_IF_ERROR(TRITONCACHE_CacheEntryGetItem(entry, item_index, &item));
+  for (size_t buffer_index = 0; buffer_index < num_buffers; buffer_index++) {
+    // Get buffer and its buffer attributes from Triton
+    void* base = nullptr;
+    TRITONSERVER_BufferAttributes* attrs = nullptr;
+    // TODO: Delete attrs on cache cleanup
+    RETURN_IF_ERROR(TRITONSERVER_BufferAttributesNew(&attrs));
+    RETURN_IF_ERROR(
+        TRITONCACHE_CacheEntryGetBuffer(entry, buffer_index, &base, attrs));
 
-    size_t num_buffers = 0;
-    RETURN_IF_ERROR(TRITONCACHE_CacheEntryItemBufferCount(item, &num_buffers));
+    // Query buffer attributes then clean up
+    size_t byte_size = 0;
+    TRITONSERVER_MemoryType memory_type = TRITONSERVER_MEMORY_CPU;
+    int64_t memory_type_id = 0;
 
-    // Form cache representation of CacheEntryItem from Triton
-    CacheEntryItem litem;
-    litem.triton_item_ = item;
-    for (size_t buffer_index = 0; buffer_index < num_buffers; buffer_index++) {
-      // Get buffer and its buffer attributes from Triton
-      void* base = nullptr;
-      TRITONSERVER_BufferAttributes* attrs = nullptr;
-      // TODO: Delete attrs on cache cleanup
-      RETURN_IF_ERROR(TRITONSERVER_BufferAttributesNew(&attrs));
-      RETURN_IF_ERROR(TRITONCACHE_CacheEntryItemGetBuffer(
-          item, buffer_index, &base, attrs));
+    RETURN_IF_ERROR(TRITONSERVER_BufferAttributesByteSize(attrs, &byte_size));
+    RETURN_IF_ERROR(
+        TRITONSERVER_BufferAttributesMemoryType(attrs, &memory_type));
+    RETURN_IF_ERROR(
+        TRITONSERVER_BufferAttributesMemoryTypeId(attrs, &memory_type_id));
 
-      // Query buffer attributes then clean up
-      size_t byte_size = 0;
-      TRITONSERVER_MemoryType memory_type = TRITONSERVER_MEMORY_CPU;
-      int64_t memory_type_id = 0;
-
-      RETURN_IF_ERROR(TRITONSERVER_BufferAttributesByteSize(attrs, &byte_size));
-      RETURN_IF_ERROR(
-          TRITONSERVER_BufferAttributesMemoryType(attrs, &memory_type));
-      RETURN_IF_ERROR(
-          TRITONSERVER_BufferAttributesMemoryTypeId(attrs, &memory_type_id));
-
-      // DLIS-2673: Add better memory_type support
-      if (memory_type != TRITONSERVER_MEMORY_CPU &&
-          memory_type != TRITONSERVER_MEMORY_CPU_PINNED) {
-        return TRITONSERVER_ErrorNew(
-            TRITONSERVER_ERROR_INVALID_ARG,
-            "Only input buffers in CPU memory are allowed in cache currently");
-      }
-
-      if (!byte_size) {
-        return TRITONSERVER_ErrorNew(
-            TRITONSERVER_ERROR_INTERNAL, "buffer size was zero");
-      }
-
-      // TODO
-      // Cache will replace this base pointer with a new cache-allocated base
-      // pointer internally on Insert()
-      litem.buffers_.emplace_back(std::make_pair(base, attrs));
+    // DLIS-2673: Add better memory_type support
+    if (memory_type != TRITONSERVER_MEMORY_CPU &&
+        memory_type != TRITONSERVER_MEMORY_CPU_PINNED) {
+      return TRITONSERVER_ErrorNew(
+          TRITONSERVER_ERROR_INVALID_ARG,
+          "Only input buffers in CPU memory are allowed in cache currently");
     }
-    lentry.items_.emplace_back(litem);
+
+    if (!byte_size) {
+      return TRITONSERVER_ErrorNew(
+          TRITONSERVER_ERROR_INTERNAL, "buffer size was zero");
+    }
+
+    // TODO
+    // Cache will replace this base pointer with a new cache-allocated base
+    // pointer internally on Insert()
+    lentry.buffers_.emplace_back(std::make_pair(base, attrs));
   }
 
   RETURN_IF_ERROR(lcache->Insert(key, lentry, allocator));
