@@ -64,7 +64,8 @@ TRITONCACHE_CacheFinalize(TRITONCACHE_Cache* cache)
 
 TRITONSERVER_Error*
 TRITONCACHE_CacheLookup(
-    TRITONCACHE_Cache* cache, const char* key, TRITONCACHE_CacheEntry* entry)
+    TRITONCACHE_Cache* cache, const char* key, TRITONCACHE_CacheEntry* entry,
+    TRITONCACHE_Allocator* allocator)
 {
   if (cache == nullptr) {
     return TRITONSERVER_ErrorNew(
@@ -72,51 +73,19 @@ TRITONCACHE_CacheLookup(
   } else if (entry == nullptr) {
     return TRITONSERVER_ErrorNew(
         TRITONSERVER_ERROR_INVALID_ARG, "cache entry was nullptr");
+  } else if (allocator == nullptr) {
+    return TRITONSERVER_ErrorNew(
+        TRITONSERVER_ERROR_INVALID_ARG, "allocator was nullptr");
   }
 
   const auto lcache = reinterpret_cast<LocalCache*>(cache);
-  auto [err, lentry] = lcache->Lookup(key);
-  if (err != nullptr) {
-    return err;
-  }
-
-  for (const auto& item : lentry.items_) {
-    TRITONCACHE_CacheEntryItem* triton_item = nullptr;
-    RETURN_IF_ERROR(TRITONCACHE_CacheEntryItemNew(&triton_item));
-    for (const auto& [buffer, byte_size] : item.buffers_) {
-      if (!buffer || !byte_size) {
-        return TRITONSERVER_ErrorNew(
-            TRITONSERVER_ERROR_INTERNAL, "buffer was null or size was zero");
-      }
-
-      // Create and set buffer attributes
-      // DLIS-2673: Add better memory_type support, default to CPU memory for
-      // now
-      TRITONSERVER_BufferAttributes* buffer_attributes = nullptr;
-      RETURN_IF_ERROR(TRITONSERVER_BufferAttributesNew(&buffer_attributes));
-      RETURN_IF_ERROR(TRITONSERVER_BufferAttributesSetByteSize(
-          buffer_attributes, byte_size));
-      RETURN_IF_ERROR(TRITONSERVER_BufferAttributesSetMemoryType(
-          buffer_attributes, TRITONSERVER_MEMORY_CPU));
-      RETURN_IF_ERROR(
-          TRITONSERVER_BufferAttributesSetMemoryTypeId(buffer_attributes, 0));
-      // Add buffer then clean up
-      RETURN_IF_ERROR(TRITONCACHE_CacheEntryItemAddBuffer(
-          triton_item, buffer, buffer_attributes));
-      RETURN_IF_ERROR(TRITONSERVER_BufferAttributesDelete(buffer_attributes));
-    }
-
-    // Pass ownership of triton_item to Triton to avoid copy. Triton will
-    // be responsible for cleaning it up, so do not call CacheEntryItemDelete.
-    RETURN_IF_ERROR(TRITONCACHE_CacheEntryAddItem(entry, triton_item));
-  }
-
-  return nullptr;  // success
+  return lcache->Lookup(key, entry, allocator);
 }
 
 TRITONSERVER_Error*
 TRITONCACHE_CacheInsert(
-    TRITONCACHE_Cache* cache, const char* key, TRITONCACHE_CacheEntry* entry)
+    TRITONCACHE_Cache* cache, const char* key, TRITONCACHE_CacheEntry* entry,
+    TRITONCACHE_Allocator* allocator)
 {
   if (cache == nullptr) {
     return TRITONSERVER_ErrorNew(
@@ -127,6 +96,9 @@ TRITONCACHE_CacheInsert(
   } else if (key == nullptr) {
     return TRITONSERVER_ErrorNew(
         TRITONSERVER_ERROR_INVALID_ARG, "key was nullptr");
+  } else if (allocator == nullptr) {
+    return TRITONSERVER_ErrorNew(
+        TRITONSERVER_ERROR_INVALID_ARG, "allocator was nullptr");
   }
 
   const auto lcache = reinterpret_cast<LocalCache*>(cache);
@@ -141,6 +113,7 @@ TRITONCACHE_CacheInsert(
 
   // Form cache representation of CacheEntry from Triton
   CacheEntry lentry;
+  lentry.triton_entry_ = entry;
   for (size_t item_index = 0; item_index < num_items; item_index++) {
     TRITONCACHE_CacheEntryItem* item = nullptr;
     RETURN_IF_ERROR(TRITONCACHE_CacheEntryGetItem(entry, item_index, &item));
@@ -150,26 +123,26 @@ TRITONCACHE_CacheInsert(
 
     // Form cache representation of CacheEntryItem from Triton
     CacheEntryItem litem;
+    litem.triton_item_ = item;
     for (size_t buffer_index = 0; buffer_index < num_buffers; buffer_index++) {
       // Get buffer and its buffer attributes from Triton
       void* base = nullptr;
-      TRITONSERVER_BufferAttributes* buffer_attributes = nullptr;
-      RETURN_IF_ERROR(TRITONSERVER_BufferAttributesNew(&buffer_attributes));
+      TRITONSERVER_BufferAttributes* attrs = nullptr;
+      // TODO: Delete attrs on cache cleanup
+      RETURN_IF_ERROR(TRITONSERVER_BufferAttributesNew(&attrs));
       RETURN_IF_ERROR(TRITONCACHE_CacheEntryItemGetBuffer(
-          item, buffer_index, &base, buffer_attributes));
+          item, buffer_index, &base, attrs));
 
       // Query buffer attributes then clean up
       size_t byte_size = 0;
       TRITONSERVER_MemoryType memory_type = TRITONSERVER_MEMORY_CPU;
       int64_t memory_type_id = 0;
 
+      RETURN_IF_ERROR(TRITONSERVER_BufferAttributesByteSize(attrs, &byte_size));
       RETURN_IF_ERROR(
-          TRITONSERVER_BufferAttributesByteSize(buffer_attributes, &byte_size));
-      RETURN_IF_ERROR(TRITONSERVER_BufferAttributesMemoryType(
-          buffer_attributes, &memory_type));
-      RETURN_IF_ERROR(TRITONSERVER_BufferAttributesMemoryTypeId(
-          buffer_attributes, &memory_type_id));
-      RETURN_IF_ERROR(TRITONSERVER_BufferAttributesDelete(buffer_attributes));
+          TRITONSERVER_BufferAttributesMemoryType(attrs, &memory_type));
+      RETURN_IF_ERROR(
+          TRITONSERVER_BufferAttributesMemoryTypeId(attrs, &memory_type_id));
 
       // DLIS-2673: Add better memory_type support
       if (memory_type != TRITONSERVER_MEMORY_CPU &&
@@ -184,14 +157,15 @@ TRITONCACHE_CacheInsert(
             TRITONSERVER_ERROR_INTERNAL, "buffer size was zero");
       }
 
+      // TODO
       // Cache will replace this base pointer with a new cache-allocated base
       // pointer internally on Insert()
-      litem.buffers_.emplace_back(std::make_pair(base, byte_size));
+      litem.buffers_.emplace_back(std::make_pair(base, attrs));
     }
     lentry.items_.emplace_back(litem);
   }
 
-  RETURN_IF_ERROR(lcache->Insert(key, lentry));
+  RETURN_IF_ERROR(lcache->Insert(key, lentry, allocator));
   return nullptr;  // success
 }
 

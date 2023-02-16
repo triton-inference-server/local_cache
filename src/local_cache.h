@@ -26,9 +26,11 @@
 
 #include <atomic>
 #include <boost/interprocess/managed_external_buffer.hpp>
+#include <iostream>
 #include <list>
 #include <memory>
 #include <mutex>
+#include <shared_mutex>
 #include <thread>
 #include <unordered_map>
 #include <vector>
@@ -45,16 +47,23 @@
 
 namespace triton { namespace cache { namespace local {
 
-using Buffer = std::pair<void*, size_t>;  // pointer and size
+using Buffer = std::pair<void*, TRITONSERVER_BufferAttributes*>;
+
+TRITONSERVER_Error* CopyAttributes(
+    TRITONSERVER_BufferAttributes* in, TRITONSERVER_BufferAttributes* out);
 
 struct CacheEntryItem {
   std::vector<Buffer> buffers_;
+  // TODO
+  TRITONCACHE_CacheEntryItem* triton_item_;
 };
 
 struct CacheEntry {
   std::vector<CacheEntryItem> items_;
   // Point to key in LRU list for maintaining LRU order
   std::list<std::string>::iterator lru_iter_;
+  // TODO
+  TRITONCACHE_CacheEntry* triton_entry_;
 };
 
 struct TritonMetric {
@@ -103,11 +112,17 @@ class LocalCache {
 
   // Lookup key in cache and return the data associated with it
   // Return TRITONSERVER_Error* object indicating success or failure.
-  std::pair<TRITONSERVER_Error*, CacheEntry> Lookup(const std::string& key);
+  // TODO
+  // std::pair<TRITONSERVER_Error*, CacheEntry> Lookup(
+  TRITONSERVER_Error* Lookup(
+      const std::string& key, TRITONCACHE_CacheEntry* entry,
+      TRITONCACHE_Allocator* allocator);
 
   // Insert entry into cache, evict entries to make space if necessary
   // Return TRITONSERVER_Error* object indicating success or failure.
-  TRITONSERVER_Error* Insert(const std::string& key, CacheEntry& entry);
+  TRITONSERVER_Error* Insert(
+      const std::string& key, CacheEntry& entry,
+      TRITONCACHE_Allocator* allocator);
 
   // Checks if key exists in cache
   // Return true if key exists in cache, false otherwise.
@@ -163,7 +178,7 @@ class LocalCache {
   // Managed buffer
   boost::interprocess::managed_external_buffer managed_buffer_;
   // Protect concurrent cache access
-  std::mutex cache_mu_;
+  std::shared_mutex cache_mu_;
   // Protect concurrent managed buffer access
   std::mutex buffer_mu_;
   // key -> CacheEntry containing values and list iterator for LRU management
