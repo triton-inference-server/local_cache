@@ -139,10 +139,13 @@ LocalCache::~LocalCache()
   for (auto& iter : cache_) {
     auto& entry = iter.second;
     for (auto& item : entry.items_) {
-      for (auto& [buffer, byte_size] : item.buffers_) {
-        if (buffer != nullptr) {
-          // TODO
+      for (auto& [buffer, attrs] : item.buffers_) {
+        if (buffer) {
           managed_buffer_.deallocate(buffer);
+        }
+
+        if (attrs) {
+          TRITONSERVER_BufferAttributesDelete(attrs);
         }
       }
     }
@@ -271,8 +274,6 @@ LocalCache::Lookup(
     TRITONCACHE_CacheEntryItem* triton_item = nullptr;
     RETURN_IF_ERROR(TRITONCACHE_CacheEntryItemNew(&triton_item));
     for (const auto [buffer, attrs] : item.buffers_) {
-      // TODO
-
       // Create copy of buffer attrs to return to Triton
       TRITONSERVER_BufferAttributes* attrs_copy = nullptr;
       RETURN_IF_ERROR(TRITONSERVER_BufferAttributesNew(&attrs_copy));
@@ -288,15 +289,12 @@ LocalCache::Lookup(
 
       // Allocator callback will be used to copy all entry buffers in Triton
       // before this function returns to avoid pre-mature eviction
-
-      // TODO
       RETURN_IF_ERROR(
           TRITONCACHE_CacheEntryItemAddBuffer(triton_item, buffer, attrs_copy));
     }
 
     // Pass ownership of triton_item to Triton to avoid copy. Triton will
     // be responsible for cleaning it up, so do not call CacheEntryItemDelete.
-
     RETURN_IF_ERROR(TRITONCACHE_CacheEntryAddItem(triton_entry, triton_item));
   }
 
@@ -346,10 +344,15 @@ LocalCache::Insert(
 
   // Allocate and copy into a chunk from managed buffer for each item in entry
   // NOTE: probably a cleaner way to do this
+  bool callback = false;
   for (auto& item : entry.items_) {
-    for (size_t b = 0; b < item.buffers_.size(); b++) {
-      auto& [base, attrs] = item.buffers_[b];
-      // TODO
+    for (size_t idx = 0; idx < item.buffers_.size(); idx++) {
+      auto& [base, attrs] = item.buffers_[idx];
+      if (!attrs) {
+        return TRITONSERVER_ErrorNew(
+            TRITONSERVER_ERROR_INVALID_ARG,
+            std::string("Buffer attributes was nullptr").c_str());
+      }
 
       size_t byte_size = 0;
       RETURN_IF_ERROR(TRITONSERVER_BufferAttributesByteSize(attrs, &byte_size));
@@ -357,16 +360,29 @@ LocalCache::Insert(
       void* new_base = nullptr;
       // Request block of memory from cache
       RETURN_IF_ERROR(Allocate(byte_size, &new_base));
-      // TODO
-      RETURN_IF_ERROR(TRITONCACHE_CacheEntryItemSetBuffer(
-          item.triton_item_, b, new_base, attrs));
+      // NOTE: For now, buffers in an item are expected to either uniformly
+      // all be null, or all be non-null. A mix of null and non-null buffers
+      // may lead to unexpected behavior or error.
+      if (base) {
+        // If buffer is provided, copy directly into cache buffer from it
+        std::memcpy(new_base, base, byte_size);
+      } else {
+        // Null buffer indicates we should provide buffer on cache side
+        // and make callback to copy into it. No need to pass back buffer
+        // attributes as they should already be set.
+        RETURN_IF_ERROR(TRITONCACHE_CacheEntryItemSetBuffer(
+            item.triton_item_, idx, new_base, nullptr));
+        callback = true;
+      }
+      // Set local entry buffer to cache allocated buffer for insertion
       base = new_base;
     }
   }
 
-  // Let Triton copy directly into cache buffers to avoid intermediate copies
-  RETURN_IF_ERROR(TRITONCACHE_Copy(allocator, entry.triton_entry_));
-
+  if (callback) {
+    // Let Triton copy directly into cache buffers to avoid intermediate copies
+    RETURN_IF_ERROR(TRITONCACHE_Copy(allocator, entry.triton_entry_));
+  }
   auto [iter, success] = cache_.insert({key, entry});
   if (!success) {
     return TRITONSERVER_ErrorNew(

@@ -96,9 +96,6 @@ TRITONCACHE_CacheInsert(
   } else if (key == nullptr) {
     return TRITONSERVER_ErrorNew(
         TRITONSERVER_ERROR_INVALID_ARG, "key was nullptr");
-  } else if (allocator == nullptr) {
-    return TRITONSERVER_ErrorNew(
-        TRITONSERVER_ERROR_INVALID_ARG, "allocator was nullptr");
   }
 
   const auto lcache = reinterpret_cast<LocalCache*>(cache);

@@ -54,7 +54,6 @@ TRITONSERVER_Error* CopyAttributes(
 
 struct CacheEntryItem {
   std::vector<Buffer> buffers_;
-  // TODO
   TRITONCACHE_CacheEntryItem* triton_item_;
 };
 
@@ -62,7 +61,6 @@ struct CacheEntry {
   std::vector<CacheEntryItem> items_;
   // Point to key in LRU list for maintaining LRU order
   std::list<std::string>::iterator lru_iter_;
-  // TODO
   TRITONCACHE_CacheEntry* triton_entry_;
 };
 
@@ -112,7 +110,6 @@ class LocalCache {
 
   // Lookup key in cache and return the data associated with it
   // Return TRITONSERVER_Error* object indicating success or failure.
-  // TODO
   // std::pair<TRITONSERVER_Error*, CacheEntry> Lookup(
   TRITONSERVER_Error* Lookup(
       const std::string& key, TRITONCACHE_CacheEntry* entry,
