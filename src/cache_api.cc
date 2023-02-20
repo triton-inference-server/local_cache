@@ -99,65 +99,7 @@ TRITONCACHE_CacheInsert(
   }
 
   const auto lcache = reinterpret_cast<LocalCache*>(cache);
-  if (lcache->Exists(key)) {
-    return TRITONSERVER_ErrorNew(
-        TRITONSERVER_ERROR_ALREADY_EXISTS,
-        (std::string("key '") + key + std::string("' already exists")).c_str());
-  }
-
-  size_t num_buffers = 0;
-  RETURN_IF_ERROR(TRITONCACHE_CacheEntryBufferCount(entry, &num_buffers));
-
-  // Form cache representation of CacheEntry from Triton
-  // TODO: Move everything into LocalCache::Insert, or use smart pointer
-  // to auto handle cleanup
-  auto lentry = new CacheEntry();
-  lentry->triton_entry_ = entry;
-  for (size_t buffer_index = 0; buffer_index < num_buffers; buffer_index++) {
-    // Get buffer and its buffer attributes from Triton
-    void* base = nullptr;
-    TRITONSERVER_BufferAttributes* attrs = nullptr;
-    // TODO: Delete attrs on cache cleanup
-    RETURN_IF_ERROR(TRITONSERVER_BufferAttributesNew(&attrs));
-    RETURN_IF_ERROR(
-        TRITONCACHE_CacheEntryGetBuffer(entry, buffer_index, &base, attrs));
-
-    // Query buffer attributes then clean up
-    size_t byte_size = 0;
-    TRITONSERVER_MemoryType memory_type = TRITONSERVER_MEMORY_CPU;
-    int64_t memory_type_id = 0;
-
-    RETURN_IF_ERROR(TRITONSERVER_BufferAttributesByteSize(attrs, &byte_size));
-    RETURN_IF_ERROR(
-        TRITONSERVER_BufferAttributesMemoryType(attrs, &memory_type));
-    RETURN_IF_ERROR(
-        TRITONSERVER_BufferAttributesMemoryTypeId(attrs, &memory_type_id));
-
-    // DLIS-2673: Add better memory_type support
-    if (memory_type != TRITONSERVER_MEMORY_CPU &&
-        memory_type != TRITONSERVER_MEMORY_CPU_PINNED) {
-      return TRITONSERVER_ErrorNew(
-          TRITONSERVER_ERROR_INVALID_ARG,
-          "Only input buffers in CPU memory are allowed in cache currently");
-    }
-
-    if (!byte_size) {
-      return TRITONSERVER_ErrorNew(
-          TRITONSERVER_ERROR_INTERNAL, "buffer size was zero");
-    }
-
-    // TODO
-    // Cache will replace this base pointer with a new cache-allocated base
-    // pointer internally on Insert()
-    std::cout << "Emplace base: " << base << ", attrs: " << attrs
-              << ", into local::entry: " << lentry << std::endl;
-    lentry->buffers_.emplace_back(std::make_pair(base, attrs));
-  }
-
-  std::cout << "~~~~~~ [cache_api.cc] Insert lentry: " << lentry << std::endl;
-  RETURN_IF_ERROR(lcache->Insert(key, lentry, allocator));
-  std::cout << "~~~~~~ [cache_api.cc] DONE Insert lentry: " << lentry
-            << std::endl;
+  RETURN_IF_ERROR(lcache->Insert(key, entry, allocator));
   return nullptr;  // success
 }
 
