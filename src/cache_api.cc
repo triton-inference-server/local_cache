@@ -109,8 +109,10 @@ TRITONCACHE_CacheInsert(
   RETURN_IF_ERROR(TRITONCACHE_CacheEntryBufferCount(entry, &num_buffers));
 
   // Form cache representation of CacheEntry from Triton
-  CacheEntry lentry;
-  lentry.triton_entry_ = entry;
+  // TODO: Move everything into LocalCache::Insert, or use smart pointer
+  // to auto handle cleanup
+  auto lentry = new CacheEntry();
+  lentry->triton_entry_ = entry;
   for (size_t buffer_index = 0; buffer_index < num_buffers; buffer_index++) {
     // Get buffer and its buffer attributes from Triton
     void* base = nullptr;
@@ -147,10 +149,15 @@ TRITONCACHE_CacheInsert(
     // TODO
     // Cache will replace this base pointer with a new cache-allocated base
     // pointer internally on Insert()
-    lentry.buffers_.emplace_back(std::make_pair(base, attrs));
+    std::cout << "Emplace base: " << base << ", attrs: " << attrs
+              << ", into local::entry: " << lentry << std::endl;
+    lentry->buffers_.emplace_back(std::make_pair(base, attrs));
   }
 
+  std::cout << "~~~~~~ [cache_api.cc] Insert lentry: " << lentry << std::endl;
   RETURN_IF_ERROR(lcache->Insert(key, lentry, allocator));
+  std::cout << "~~~~~~ [cache_api.cc] DONE Insert lentry: " << lentry
+            << std::endl;
   return nullptr;  // success
 }
 

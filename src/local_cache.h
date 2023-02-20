@@ -53,6 +53,18 @@ TRITONSERVER_Error* CopyAttributes(
     TRITONSERVER_BufferAttributes* in, TRITONSERVER_BufferAttributes* out);
 
 struct CacheEntry {
+  ~CacheEntry()
+  {
+    std::cout << "Cleaning up local::CacheEntry: " << this << std::endl;
+    for (auto& [base, attrs] : buffers_) {
+      if (attrs) {
+        TRITONSERVER_BufferAttributesDelete(attrs);
+        attrs = nullptr;
+      }
+    }
+    std::cout << "DONE cleaning up local::CacheEntry: " << this << std::endl;
+  }
+
   std::vector<Buffer> buffers_;
   // Point to key in LRU list for maintaining LRU order
   std::list<std::string>::iterator lru_iter_;
@@ -113,7 +125,7 @@ class LocalCache {
   // Insert entry into cache, evict entries to make space if necessary
   // Return TRITONSERVER_Error* object indicating success or failure.
   TRITONSERVER_Error* Insert(
-      const std::string& key, CacheEntry& entry,
+      const std::string& key, CacheEntry* entry,
       TRITONCACHE_Allocator* allocator);
 
   // Checks if key exists in cache
@@ -128,7 +140,7 @@ class LocalCache {
   LocalCache(uint64_t size);
   // Update ordering used for LRU eviction policy
   void UpdateLRU(
-      std::unordered_map<std::string, CacheEntry>::iterator& cache_iter);
+      std::unordered_map<std::string, CacheEntry*>::iterator& cache_iter);
   // Request buffer from managed buffer
   TRITONSERVER_Error* Allocate(uint64_t byte_size, void** buffer);
 
@@ -174,7 +186,7 @@ class LocalCache {
   // Protect concurrent managed buffer access
   std::mutex buffer_mu_;
   // key -> CacheEntry containing values and list iterator for LRU management
-  std::unordered_map<std::string, CacheEntry> cache_;
+  std::unordered_map<std::string, CacheEntry*> cache_;
   // List of keys sorted from most to least recently used
   std::list<std::string> lru_;
 };

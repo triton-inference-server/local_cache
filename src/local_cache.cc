@@ -120,6 +120,7 @@ LocalCache::LocalCache(uint64_t size)
     if (err != nullptr) {
       LOG_ERROR << "Failed to initialize metrics: "
                 << TRITONSERVER_ErrorMessage(err);
+      TRITONSERVER_ErrorDelete(err);
     }
   }
 
@@ -128,6 +129,7 @@ LocalCache::LocalCache(uint64_t size)
 
 LocalCache::~LocalCache()
 {
+  std::cout << "~~~ [local_cache.cc] Cleaing up LocalCache" << std::endl;
   LOG_INFO << "Cleaning up LocalCache";
   // Signal metrics thread to exit and wait for it
   if (metrics_thread_ != nullptr) {
@@ -135,18 +137,22 @@ LocalCache::~LocalCache()
     metrics_thread_->join();
   }
 
-  // Deallocate each chunk from managed buffer
+  // Deallocate each chunk from managed buffer and delete entry holding metadata
   for (auto& iter : cache_) {
-    auto& entry = iter.second;
-    for (auto& [buffer, attrs] : entry.buffers_) {
+    auto entry = iter.second;
+    for (auto& [buffer, attrs] : entry->buffers_) {
       if (buffer) {
+        std::cout << "Deallocating buffer: " << buffer << std::endl;
         managed_buffer_.deallocate(buffer);
       }
 
       if (attrs) {
+        std::cout << "Deleting attrs: " << attrs << std::endl;
         TRITONSERVER_BufferAttributesDelete(attrs);
+        attrs = nullptr;
       }
     }
+    delete entry;
   }
 
   // Validate we freed all underlying memory managed by cache
@@ -157,8 +163,10 @@ LocalCache::~LocalCache()
 
   // Free total cache buffer
   if (buffer_ != nullptr) {
+    std::cout << "Freeing buffer: " << buffer_ << std::endl;
     free(buffer_);
   }
+  std::cout << "~~~ [local_cache.cc] DONE Cleaing up LocalCache" << std::endl;
 }
 
 TRITONSERVER_Error*
@@ -257,10 +265,9 @@ LocalCache::Lookup(
   auto iter = cache_.find(key);
   if (iter == cache_.end()) {
     num_misses_++;  // must be protected
-    auto err = TRITONSERVER_ErrorNew(
+    return TRITONSERVER_ErrorNew(
         TRITONSERVER_ERROR_NOT_FOUND,
         std::string("key [" + key + "] does not exist").c_str());
-    return err;
   }
 
   num_hits_++;  // must be protected
@@ -268,12 +275,8 @@ LocalCache::Lookup(
 
   // Build TRITONCACHE_CacheEntry from cache representation of entry
   auto entry = iter->second;
-  for (const auto [buffer, attrs] : entry.buffers_) {
-    // Create copy of buffer attrs to return to Triton
-    TRITONSERVER_BufferAttributes* attrs_copy = nullptr;
-    RETURN_IF_ERROR(TRITONSERVER_BufferAttributesNew(&attrs_copy));
-    RETURN_IF_ERROR(CopyAttributes(attrs, attrs_copy));
-
+  for (const auto [buffer, attrs] : entry->buffers_) {
+    // Triton will copy from passed attrs if needed, so pass as-is for now
     size_t byte_size = 0;
     RETURN_IF_ERROR(TRITONSERVER_BufferAttributesByteSize(attrs, &byte_size));
     if (!buffer || !attrs || !byte_size) {
@@ -285,7 +288,7 @@ LocalCache::Lookup(
     // Allocator callback will be used to copy all entry buffers in Triton
     // before this function returns to avoid pre-mature eviction
     RETURN_IF_ERROR(
-        TRITONCACHE_CacheEntryAddBuffer(triton_entry, buffer, attrs_copy));
+        TRITONCACHE_CacheEntryAddBuffer(triton_entry, buffer, attrs));
   }
 
   // Copy entry buffers directly into allocator-provided buffers
@@ -294,23 +297,42 @@ LocalCache::Lookup(
 
 TRITONSERVER_Error*
 LocalCache::Insert(
-    const std::string& key, CacheEntry& entry, TRITONCACHE_Allocator* allocator)
+    const std::string& key, CacheEntry* entry, TRITONCACHE_Allocator* allocator)
 {
   std::unique_lock lk(cache_mu_);
   // total_insertion_latency must be protected by mutex
   helpers::ScopedTimer timer(total_insertion_latency_us_);
 
+  if (!entry) {
+    return TRITONSERVER_ErrorNew(TRITONSERVER_ERROR_INTERNAL, "entry was null");
+  }
+
+  std::cout << "~~~~~~ [local_cache.cc] Insert entry: " << entry << std::endl;
   // Check that sum of entry sizes does not exceed total available cache size
   {
     std::unique_lock lk(buffer_mu_);
     uint64_t total_entry_size = 0;
-    for (auto& [base, attrs] : entry.buffers_) {
+    for (auto& [base, attrs] : entry->buffers_) {
+      std::cout << "~~~~~~ [local_cache.cc] base: " << base << std::endl;
       size_t byte_size = 0;
+      if (!attrs) {
+        std::cout << "~~~~~~~~ [local_cache.cc] ERROR: attrs was nullptr"
+                  << std::endl;
+      }
       RETURN_IF_ERROR(TRITONSERVER_BufferAttributesByteSize(attrs, &byte_size));
       total_entry_size += byte_size;
     }
 
+    std::cout << "~~~~~~ [local_cache.cc] total_entry_size: "
+              << total_entry_size << std::endl;
+    std::cout << "~~~~~~ [local_cache.cc] managed_buffer_.get_size(): "
+              << managed_buffer_.get_size() << std::endl;
+
     if (total_entry_size > managed_buffer_.get_size()) {
+      std::cout << "~~~~~~ [local_cache.cc] total_entry_size too large: "
+                << total_entry_size << std::endl;
+      // TODO
+      delete entry;
       return TRITONSERVER_ErrorNew(
           TRITONSERVER_ERROR_INTERNAL,
           std::string(
@@ -321,6 +343,7 @@ LocalCache::Insert(
     }
   }
 
+  std::cout << "~~~~~~ [local_cache.cc] cache_find" << std::endl;
   // Exit early if key already exists to avoid setting up entry unnecessarily
   if (cache_.find(key) != cache_.end()) {
     return TRITONSERVER_ErrorNew(
@@ -329,11 +352,14 @@ LocalCache::Insert(
             .c_str());
   }
 
+  std::cout << "~~~~~~ [local_cache.cc] cache_find done" << std::endl;
   // Allocate and copy into a chunk from managed buffer for each buffer in entry
   // NOTE: probably a cleaner way to do this
   bool callback = false;
-  for (size_t idx = 0; idx < entry.buffers_.size(); idx++) {
-    auto& [base, attrs] = entry.buffers_[idx];
+  for (size_t idx = 0; idx < entry->buffers_.size(); idx++) {
+    auto& [base, attrs] = entry->buffers_[idx];
+    std::cout << "~~~~~~ [local_cache.cc] base: " << base
+              << ", attrs: " << attrs << std::endl;
     if (!attrs) {
       return TRITONSERVER_ErrorNew(
           TRITONSERVER_ERROR_INVALID_ARG,
@@ -344,6 +370,7 @@ LocalCache::Insert(
     RETURN_IF_ERROR(TRITONSERVER_BufferAttributesByteSize(attrs, &byte_size));
     // Copy triton contents into cache representation for cache to own
     void* new_base = nullptr;
+    std::cout << "~~~~~~ [local_cache.cc] Allocate: " << byte_size << std::endl;
     // Request block of memory from cache
     RETURN_IF_ERROR(Allocate(byte_size, &new_base));
     // NOTE: For now, buffers in an entry are expected to either uniformly
@@ -352,22 +379,32 @@ LocalCache::Insert(
     if (base) {
       // If buffer is provided, copy directly into cache buffer from it
       std::memcpy(new_base, base, byte_size);
+      // TODO
+      // Set buffer to nullptr to indicate we're done with it
+      // RETURN_IF_ERROR(TRITONCACHE_CacheEntrySetBuffer(
+      //    entry.triton_entry_, idx, nullptr, nullptr));
     } else {
       // Null buffer indicates we should provide buffer on cache side
       // and make callback to copy into it. No need to pass back buffer
       // attributes as they should already be set.
       RETURN_IF_ERROR(TRITONCACHE_CacheEntrySetBuffer(
-          entry.triton_entry_, idx, new_base, nullptr));
+          entry->triton_entry_, idx, new_base, nullptr));
       callback = true;
     }
     // Set local entry buffer to cache allocated buffer for insertion
+    std::cout << "~~~~~~ [local_cache.cc] Allocate base: " << base << std::endl;
     base = new_base;
+    std::cout << "~~~~~~ [local_cache.cc] Allocate new_base: " << new_base
+              << std::endl;
   }
 
+  std::cout << "Callback: " << callback << std::endl;
   if (callback) {
+    std::cout << "Making Callback: " << callback << std::endl;
     // Let Triton copy directly into cache buffers to avoid intermediate copies
-    RETURN_IF_ERROR(TRITONCACHE_Copy(allocator, entry.triton_entry_));
+    RETURN_IF_ERROR(TRITONCACHE_Copy(allocator, entry->triton_entry_));
   }
+  std::cout << "Callback done: " << callback << std::endl;
   auto [iter, success] = cache_.insert({key, entry});
   if (!success) {
     return TRITONSERVER_ErrorNew(
@@ -407,10 +444,11 @@ LocalCache::Evict()
   // Get size of cache entry being evicted to update available size
   auto entry = iter->second;
   // Free managed memory used in cache entry's outputs
-  for (auto& [base, byte_size] : entry.buffers_) {
+  for (auto& [base, byte_size] : entry->buffers_) {
     // Lock on managed_buffer assumed to be already held
     managed_buffer_.deallocate(base);
   }
+  delete entry;
 
   // Remove LRU entry from cache
   cache_.erase(lru_key);
@@ -424,12 +462,12 @@ LocalCache::Evict()
 // Helpers
 void
 LocalCache::UpdateLRU(
-    std::unordered_map<std::string, CacheEntry>::iterator& cache_iter)
+    std::unordered_map<std::string, CacheEntry*>::iterator& cache_iter)
 {
   // NOTE: Unique lock on cache mutex must be held for this function
 
   const auto& key = cache_iter->first;
-  auto& cache_entry = cache_iter->second;
+  auto cache_entry = cache_iter->second;
   // Remove key from LRU list if it was already in there
   auto lru_iter = std::find(lru_.begin(), lru_.end(), key);
   if (lru_iter != lru_.end()) {
@@ -438,7 +476,7 @@ LocalCache::UpdateLRU(
   // Add key to front of LRU list since it's most recently used
   lru_.push_front(key);
   // Set CacheEntry LRU iterator to new LRU key location
-  cache_entry.lru_iter_ = lru_.begin();
+  cache_entry->lru_iter_ = lru_.begin();
 }
 
 
