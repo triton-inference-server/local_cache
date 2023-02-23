@@ -339,7 +339,6 @@ LocalCache::Insert(
   RETURN_IF_ERROR(ParseTritonEntry(entry, metadata));
 
   // Form cache representation of entry from Triton entry
-  bool callback = false;
   auto lentry = std::make_unique<CacheEntry>();
   for (size_t idx = 0; idx < metadata.size(); idx++) {
     const auto& [base, byte_size, attrs] = metadata[idx];
@@ -347,28 +346,18 @@ LocalCache::Insert(
     void* new_base = nullptr;
     // Request block of memory from cache
     RETURN_IF_ERROR(Allocate(byte_size, &new_base));
-    // NOTE: For now, buffers in an entry are expected to either uniformly
-    // all be null, or all be non-null. A mix of null and non-null buffers
-    // may lead to unexpected behavior or error.
-    if (base) {
-      // If buffer is provided, copy directly into cache buffer from it
-      std::memcpy(new_base, base, byte_size);
-    } else {
-      // Null buffer indicates we should provide buffer on cache side
-      // and make callback to copy into it. No need to pass back buffer
-      // attributes as they should already be set.
-      RETURN_IF_ERROR(
-          TRITONCACHE_CacheEntrySetBuffer(entry, idx, new_base, nullptr));
-      callback = true;
-    }
+    // Cache should provide cache-allocated buffer in entry object
+    // and make callback so Triton can copy directly into it. No need to set
+    // new buffer attributes for now as they should already be set.
+    RETURN_IF_ERROR(
+        TRITONCACHE_CacheEntrySetBuffer(entry, idx, new_base, nullptr));
     // Set local entry buffer to cache allocated buffer for insertion
     lentry->buffers_.emplace_back(std::make_pair(new_base, attrs));
   }
 
-  if (callback) {
-    // Let Triton copy directly into cache buffers to avoid intermediate copies
-    RETURN_IF_ERROR(TRITONCACHE_Copy(allocator, entry));
-  }
+  // Use callback to let Triton copy directly into cache buffers to avoid
+  // intermediate copies
+  RETURN_IF_ERROR(TRITONCACHE_Copy(allocator, entry));
 
   auto [iter, success] = cache_.insert({key, std::move(lentry)});
   if (!success) {

@@ -62,28 +62,9 @@ TRITONCACHE_CacheFinalize(TRITONCACHE_Cache* cache)
   return nullptr;  // success
 }
 
+// Helper
 TRITONSERVER_Error*
-TRITONCACHE_CacheLookup(
-    TRITONCACHE_Cache* cache, const char* key, TRITONCACHE_CacheEntry* entry,
-    TRITONCACHE_Allocator* allocator)
-{
-  if (cache == nullptr) {
-    return TRITONSERVER_ErrorNew(
-        TRITONSERVER_ERROR_INVALID_ARG, "cache was nullptr");
-  } else if (entry == nullptr) {
-    return TRITONSERVER_ErrorNew(
-        TRITONSERVER_ERROR_INVALID_ARG, "cache entry was nullptr");
-  } else if (allocator == nullptr) {
-    return TRITONSERVER_ErrorNew(
-        TRITONSERVER_ERROR_INVALID_ARG, "allocator was nullptr");
-  }
-
-  const auto lcache = reinterpret_cast<LocalCache*>(cache);
-  return lcache->Lookup(key, entry, allocator);
-}
-
-TRITONSERVER_Error*
-TRITONCACHE_CacheInsert(
+CheckArgs(
     TRITONCACHE_Cache* cache, const char* key, TRITONCACHE_CacheEntry* entry,
     TRITONCACHE_Allocator* allocator)
 {
@@ -96,8 +77,30 @@ TRITONCACHE_CacheInsert(
   } else if (key == nullptr) {
     return TRITONSERVER_ErrorNew(
         TRITONSERVER_ERROR_INVALID_ARG, "key was nullptr");
+  } else if (allocator == nullptr) {
+    return TRITONSERVER_ErrorNew(
+        TRITONSERVER_ERROR_INVALID_ARG, "allocator was nullptr");
   }
 
+  return nullptr;  // success
+}
+
+TRITONSERVER_Error*
+TRITONCACHE_CacheLookup(
+    TRITONCACHE_Cache* cache, const char* key, TRITONCACHE_CacheEntry* entry,
+    TRITONCACHE_Allocator* allocator)
+{
+  RETURN_IF_ERROR(CheckArgs(cache, key, entry, allocator));
+  const auto lcache = reinterpret_cast<LocalCache*>(cache);
+  return lcache->Lookup(key, entry, allocator);
+}
+
+TRITONSERVER_Error*
+TRITONCACHE_CacheInsert(
+    TRITONCACHE_Cache* cache, const char* key, TRITONCACHE_CacheEntry* entry,
+    TRITONCACHE_Allocator* allocator)
+{
+  RETURN_IF_ERROR(CheckArgs(cache, key, entry, allocator));
   const auto lcache = reinterpret_cast<LocalCache*>(cache);
   RETURN_IF_ERROR(lcache->Insert(key, entry, allocator));
   return nullptr;  // success
