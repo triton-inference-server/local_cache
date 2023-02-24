@@ -74,3 +74,27 @@ too small (ex: smaller than required overhead such as ~1-2 KB), initialization
 may fail.
     - example: `tritonserver --cache-config local,size=1048576`
 
+## Metrics
+
+When `TRITON_ENABLE_METRICS` is enabled in this cache (enabled by default), 
+it will check to see if the running Triton server has metrics enabled as well.
+If so, the cache will publish additional cache-specific metrics to Triton's
+metrics endpoint through the 
+[Custom Metrics API](https://github.com/triton-inference-server/server/blob/main/docs/user_guide/metrics.md#custom-metrics).
+
+### Cache Metrics
+
+The following metrics are reported by this cache implementation:
+
+|Category      |Metric                     |Metric Name                   |Description                                                 |Granularity |Frequency    |
+|--------------|---------------------------|------------------------------|------------------------------------------------------------|------------|-------------|
+|Utilization   |Total Cache Utilization    |`nv_cache_util`               |Total cache utilization rate (0.0 - 1.0)                    |Server-wide |Per interval |
+|Count         |Total Cache Entry Count    |`nv_cache_num_entries`        |Total number of entries stored in cache                     |Server-wide |Per interval |
+|              |Total Cache Lookup Count   |`nv_cache_num_lookups`        |Total number of cache lookups done by Triton                |Server-wide |Per interval |
+|              |Total Cache Hit Count      |`nv_cache_num_hits`           |Total number of cache hits                                  |Server-wide |Per interval |
+|              |Total Cache Miss Count     |`nv_cache_num_misses`         |Total number of cache misses                                |Server-wide |Per interval |
+|              |Total Cache Eviction Count |`nv_cache_num_evictions`      |Total number of cache evictions                             |Server-wide |Per interval |
+|Latency       |Total Cache Lookup Time    |`nv_cache_lookup_duration`    |Cumulative time spent doing cache lookups (microseconds)    |Server-wide |Per interval |
+|              |Total Cache Insertion Time |`nv_cache_insertion_duration` |Cumulative time spent doint cache insertions (microseconds) |Server-wide |Per interval |
+
+
