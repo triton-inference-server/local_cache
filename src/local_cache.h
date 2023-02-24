@@ -26,6 +26,7 @@
 
 #include <atomic>
 #include <boost/interprocess/managed_external_buffer.hpp>
+#include <iostream>
 #include <list>
 #include <memory>
 #include <mutex>
@@ -45,14 +46,12 @@
 
 namespace triton { namespace cache { namespace local {
 
-using Buffer = std::pair<void*, size_t>;  // pointer and size
-
-struct CacheEntryItem {
-  std::vector<Buffer> buffers_;
-};
+using Buffer = std::pair<void*, std::shared_ptr<TRITONSERVER_BufferAttributes>>;
+using Metadata =
+    std::tuple<void*, size_t, std::shared_ptr<TRITONSERVER_BufferAttributes>>;
 
 struct CacheEntry {
-  std::vector<CacheEntryItem> items_;
+  std::vector<Buffer> buffers_;
   // Point to key in LRU list for maintaining LRU order
   std::list<std::string>::iterator lru_iter_;
 };
@@ -103,11 +102,16 @@ class LocalCache {
 
   // Lookup key in cache and return the data associated with it
   // Return TRITONSERVER_Error* object indicating success or failure.
-  std::pair<TRITONSERVER_Error*, CacheEntry> Lookup(const std::string& key);
+  // std::pair<TRITONSERVER_Error*, CacheEntry> Lookup(
+  TRITONSERVER_Error* Lookup(
+      const std::string& key, TRITONCACHE_CacheEntry* entry,
+      TRITONCACHE_Allocator* allocator);
 
   // Insert entry into cache, evict entries to make space if necessary
   // Return TRITONSERVER_Error* object indicating success or failure.
-  TRITONSERVER_Error* Insert(const std::string& key, CacheEntry& entry);
+  TRITONSERVER_Error* Insert(
+      const std::string& key, TRITONCACHE_CacheEntry* entry,
+      TRITONCACHE_Allocator* allocator);
 
   // Checks if key exists in cache
   // Return true if key exists in cache, false otherwise.
@@ -121,9 +125,15 @@ class LocalCache {
   LocalCache(uint64_t size);
   // Update ordering used for LRU eviction policy
   void UpdateLRU(
-      std::unordered_map<std::string, CacheEntry>::iterator& cache_iter);
+      std::unordered_map<std::string, std::unique_ptr<CacheEntry>>::iterator&
+          cache_iter);
   // Request buffer from managed buffer
   TRITONSERVER_Error* Allocate(uint64_t byte_size, void** buffer);
+
+  // Parse and validate fields from Triton entry, store relevant fields
+  // for building cache entry in metadata
+  TRITONSERVER_Error* ParseTritonEntry(
+      TRITONCACHE_CacheEntry* entry, std::vector<Metadata>& metadata);
 
   // Cache Metric Helpers: note the metrics must be protected when accessed
   TRITONSERVER_Error* InitMetrics();
@@ -167,7 +177,7 @@ class LocalCache {
   // Protect concurrent managed buffer access
   std::mutex buffer_mu_;
   // key -> CacheEntry containing values and list iterator for LRU management
-  std::unordered_map<std::string, CacheEntry> cache_;
+  std::unordered_map<std::string, std::unique_ptr<CacheEntry>> cache_;
   // List of keys sorted from most to least recently used
   std::list<std::string> lru_;
 };

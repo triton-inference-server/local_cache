@@ -77,7 +77,6 @@ class ScopedTimer {
 
 namespace triton { namespace cache { namespace local {
 
-
 /* LocalCache Implementation */
 LocalCache::LocalCache(uint64_t size)
 {
@@ -101,6 +100,7 @@ LocalCache::LocalCache(uint64_t size)
     if (err != nullptr) {
       LOG_ERROR << "Failed to initialize metrics: "
                 << TRITONSERVER_ErrorMessage(err);
+      TRITONSERVER_ErrorDelete(err);
     }
   }
 
@@ -116,14 +116,12 @@ LocalCache::~LocalCache()
     metrics_thread_->join();
   }
 
-  // Deallocate each chunk from managed buffer
+  // Deallocate each chunk from managed buffer and delete entry holding metadata
   for (auto& iter : cache_) {
-    auto& entry = iter.second;
-    for (auto& item : entry.items_) {
-      for (auto& [buffer, byte_size] : item.buffers_) {
-        if (buffer != nullptr) {
-          managed_buffer_.deallocate(buffer);
-        }
+    const auto& entry = iter.second;
+    for (auto& [buffer, _] : entry->buffers_) {
+      if (buffer) {
+        managed_buffer_.deallocate(buffer);
       }
     }
   }
@@ -215,17 +213,13 @@ LocalCache::Create(
   return nullptr;  // success
 }
 
-bool
-LocalCache::Exists(const std::string& key)
+TRITONSERVER_Error*
+LocalCache::Lookup(
+    const std::string& key, TRITONCACHE_CacheEntry* entry,
+    TRITONCACHE_Allocator* allocator)
 {
   std::unique_lock lk(cache_mu_);
-  return cache_.find(key) != cache_.end();
-}
 
-std::pair<TRITONSERVER_Error*, CacheEntry>
-LocalCache::Lookup(const std::string& key)
-{
-  std::unique_lock lk(cache_mu_);
   // total_lookup_latency must be protected by mutex
   helpers::ScopedTimer timer(total_lookup_latency_us_);
   num_lookups_++;  // must be protected
@@ -233,33 +227,83 @@ LocalCache::Lookup(const std::string& key)
   auto iter = cache_.find(key);
   if (iter == cache_.end()) {
     num_misses_++;  // must be protected
-    auto err = TRITONSERVER_ErrorNew(
+    return TRITONSERVER_ErrorNew(
         TRITONSERVER_ERROR_NOT_FOUND,
         std::string("key [" + key + "] does not exist").c_str());
-    return {err, {}};
   }
 
   num_hits_++;  // must be protected
   UpdateLRU(iter);
-  return std::make_pair(nullptr, iter->second);  // success
+
+  // Build TRITONCACHE_CacheEntry from cache representation of entry
+  const auto& lentry = iter->second;
+  for (const auto [buffer, attrs] : lentry->buffers_) {
+    // Triton will copy from passed attrs if needed, so pass as-is for now
+    size_t byte_size = 0;
+    RETURN_IF_ERROR(
+        TRITONSERVER_BufferAttributesByteSize(attrs.get(), &byte_size));
+    if (!buffer || !attrs || !byte_size) {
+      return TRITONSERVER_ErrorNew(
+          TRITONSERVER_ERROR_INTERNAL,
+          "buffer or attrs was null, or size was zero");
+    }
+
+    // Allocator callback will be used to copy all entry buffers in Triton
+    // before this function returns to avoid pre-mature eviction
+    RETURN_IF_ERROR(
+        TRITONCACHE_CacheEntryAddBuffer(entry, buffer, attrs.get()));
+  }
+
+  // Copy entry buffers directly into allocator-provided buffers
+  return TRITONCACHE_Copy(allocator, entry);
 }
 
+
 TRITONSERVER_Error*
-LocalCache::Insert(const std::string& key, CacheEntry& entry)
+LocalCache::ParseTritonEntry(
+    TRITONCACHE_CacheEntry* entry, std::vector<Metadata>& metadata)
 {
-  std::unique_lock lk(cache_mu_);
-  // total_insertion_latency must be protected by mutex
-  helpers::ScopedTimer timer(total_insertion_latency_us_);
+  // Form cache representation of CacheEntry from Triton
+  size_t num_buffers = 0;
+  uint64_t total_entry_size = 0;
+  RETURN_IF_ERROR(TRITONCACHE_CacheEntryBufferCount(entry, &num_buffers));
+
+  for (size_t i = 0; i < num_buffers; i++) {
+    // Get buffer and its buffer attributes from Triton
+    void* base = nullptr;
+    TRITONSERVER_BufferAttributes* attrs = nullptr;
+    RETURN_IF_ERROR(TRITONSERVER_BufferAttributesNew(&attrs));
+    std::shared_ptr<TRITONSERVER_BufferAttributes> managed_attrs(
+        attrs, TRITONSERVER_BufferAttributesDelete);
+    RETURN_IF_ERROR(TRITONCACHE_CacheEntryGetBuffer(entry, i, &base, attrs));
+
+    // Query buffer attributes then clean up
+    size_t byte_size = 0;
+    TRITONSERVER_MemoryType memory_type = TRITONSERVER_MEMORY_CPU;
+
+    RETURN_IF_ERROR(TRITONSERVER_BufferAttributesByteSize(attrs, &byte_size));
+    if (!byte_size) {
+      return TRITONSERVER_ErrorNew(
+          TRITONSERVER_ERROR_INTERNAL, "buffer size was zero");
+    }
+
+    RETURN_IF_ERROR(
+        TRITONSERVER_BufferAttributesMemoryType(attrs, &memory_type));
+    // DLIS-2673: Add better memory_type support
+    if (memory_type != TRITONSERVER_MEMORY_CPU &&
+        memory_type != TRITONSERVER_MEMORY_CPU_PINNED) {
+      return TRITONSERVER_ErrorNew(
+          TRITONSERVER_ERROR_INVALID_ARG,
+          "Only input buffers in CPU memory are allowed in cache currently");
+    }
+
+    total_entry_size += byte_size;
+    metadata.emplace_back(base, byte_size, managed_attrs);
+  }
 
   // Check that sum of entry sizes does not exceed total available cache size
   {
     std::unique_lock lk(buffer_mu_);
-    uint64_t total_entry_size = 0;
-    for (auto& item : entry.items_) {
-      for (auto& [base, byte_size] : item.buffers_) {
-        total_entry_size += byte_size;
-      }
-    }
     if (total_entry_size > managed_buffer_.get_size()) {
       return TRITONSERVER_ErrorNew(
           TRITONSERVER_ERROR_INTERNAL,
@@ -271,30 +315,51 @@ LocalCache::Insert(const std::string& key, CacheEntry& entry)
     }
   }
 
-  // Exit early if key already exists to avoid setting up entry unnecessarily
+  return nullptr;  // success
+}
+
+TRITONSERVER_Error*
+LocalCache::Insert(
+    const std::string& key, TRITONCACHE_CacheEntry* entry,
+    TRITONCACHE_Allocator* allocator)
+{
+  std::unique_lock lk(cache_mu_);
+  // total_insertion_latency must be protected by mutex
+  helpers::ScopedTimer timer(total_insertion_latency_us_);
+
+  // Exit early to avoid cost of entry setup
   if (cache_.find(key) != cache_.end()) {
     return TRITONSERVER_ErrorNew(
         TRITONSERVER_ERROR_ALREADY_EXISTS,
-        std::string("Insert failed, key [" + key + "] already exists in cache")
-            .c_str());
+        (std::string("key '") + key + std::string("' already exists")).c_str());
   }
 
-  // Allocate and copy into a chunk from managed buffer for each item in entry
-  // NOTE: probably a cleaner way to do this
-  for (auto& item : entry.items_) {
-    for (auto& [base, byte_size] : item.buffers_) {
-      // Copy triton contents into cache representation for cache to own
-      void* new_base = nullptr;
-      // Request block of memory from cache
-      RETURN_IF_ERROR(Allocate(byte_size, &new_base));
-      // Copy contents into cache-allocated buffer
-      std::memcpy(new_base, base, byte_size);
-      // Replace triton pointer with cache-allocated pointer in cache entry
-      base = new_base;
-    }
+  // Parse and validate Triton entry
+  std::vector<Metadata> metadata;
+  RETURN_IF_ERROR(ParseTritonEntry(entry, metadata));
+
+  // Form cache representation of entry from Triton entry
+  auto lentry = std::make_unique<CacheEntry>();
+  for (size_t idx = 0; idx < metadata.size(); idx++) {
+    const auto& [base, byte_size, attrs] = metadata[idx];
+    // Copy triton contents into cache representation for cache to own
+    void* new_base = nullptr;
+    // Request block of memory from cache
+    RETURN_IF_ERROR(Allocate(byte_size, &new_base));
+    // Cache should provide cache-allocated buffer in entry object
+    // and make callback so Triton can copy directly into it. No need to set
+    // new buffer attributes for now as they should already be set.
+    RETURN_IF_ERROR(
+        TRITONCACHE_CacheEntrySetBuffer(entry, idx, new_base, nullptr));
+    // Set local entry buffer to cache allocated buffer for insertion
+    lentry->buffers_.emplace_back(std::make_pair(new_base, attrs));
   }
 
-  auto [iter, success] = cache_.insert({key, entry});
+  // Use callback to let Triton copy directly into cache buffers to avoid
+  // intermediate copies
+  RETURN_IF_ERROR(TRITONCACHE_Copy(allocator, entry));
+
+  auto [iter, success] = cache_.insert({key, std::move(lentry)});
   if (!success) {
     return TRITONSERVER_ErrorNew(
         TRITONSERVER_ERROR_ALREADY_EXISTS,
@@ -331,13 +396,11 @@ LocalCache::Evict()
   }
 
   // Get size of cache entry being evicted to update available size
-  auto entry = iter->second;
+  const auto& entry = iter->second;
   // Free managed memory used in cache entry's outputs
-  for (auto& item : entry.items_) {
-    for (auto& [base, byte_size] : item.buffers_) {
-      // Lock on managed_buffer assumed to be already held
-      managed_buffer_.deallocate(base);
-    }
+  for (auto& [base, byte_size] : entry->buffers_) {
+    // Lock on managed_buffer assumed to be already held
+    managed_buffer_.deallocate(base);
   }
 
   // Remove LRU entry from cache
@@ -352,12 +415,13 @@ LocalCache::Evict()
 // Helpers
 void
 LocalCache::UpdateLRU(
-    std::unordered_map<std::string, CacheEntry>::iterator& cache_iter)
+    std::unordered_map<std::string, std::unique_ptr<CacheEntry>>::iterator&
+        cache_iter)
 {
   // NOTE: Unique lock on cache mutex must be held for this function
 
   const auto& key = cache_iter->first;
-  auto& cache_entry = cache_iter->second;
+  const auto& cache_entry = cache_iter->second;
   // Remove key from LRU list if it was already in there
   auto lru_iter = std::find(lru_.begin(), lru_.end(), key);
   if (lru_iter != lru_.end()) {
@@ -366,7 +430,7 @@ LocalCache::UpdateLRU(
   // Add key to front of LRU list since it's most recently used
   lru_.push_front(key);
   // Set CacheEntry LRU iterator to new LRU key location
-  cache_entry.lru_iter_ = lru_.begin();
+  cache_entry->lru_iter_ = lru_.begin();
 }
 
 
