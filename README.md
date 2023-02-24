@@ -1,5 +1,5 @@
 <!--
-# Copyright 2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# Copyright 2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions
@@ -31,8 +31,8 @@
 # Triton Local Cache
 
 This repo contains an example 
-[cache](https://github.com/triton-inference-server/core/blob/main/include/triton/core/tritoncache.h)
-for caching data locally in-memory.
+[TRITONCACHE API](https://github.com/triton-inference-server/core/blob/main/include/triton/core/tritoncache.h)
+implementation for caching data locally in-memory.
 
 Ask questions or report problems in the main Triton [issues
 page](https://github.com/triton-inference-server/server/issues).
@@ -42,7 +42,7 @@ page](https://github.com/triton-inference-server/server/issues).
 Use a recent cmake to build. First install the required dependencies.
 
 ```
-$ apt-get install libboost-dev
+$ apt-get install libboost-dev rapidjson-dev
 ```
 
 To build the cache:
@@ -61,23 +61,40 @@ but the following CMake arguments can be used to override.
 * triton-inference-server/core: `-D TRITON_CORE_REPO_TAG=[tag]`
 * triton-inference-server/common: `-D TRITON_COMMON_REPO_TAG=[tag]` 
 
-## Using the Cache 
+## Configuring the Cache 
 
-The cache is configured by a JSON file passed through the
-`tritonserver --cache-config config.json` CLI flag. The JSON
-file is parsed by the Cache implementation, so the fields required
-are up to the cache implementer.
+Like other `TRITONCACHE` implementations, this cache is configured through the 
+`tritonserver --cache-config` CLI arg or through the 
+`TRITONSERVER_SetCacheConfig` API.
 
-This local cache implementation only expects a `cache_size` (in bytes)
-in the config file. For example:
+Currently, the following config fields are supported:
+- `size`: The fixed size (in bytes) of CPU memory allocated to the cache 
+upfront. If this value is too large (ex: greater than available memory) or 
+too small (ex: smaller than required overhead such as ~1-2 KB), initialization
+may fail.
+    - example: `tritonserver --cache-config local,size=1048576`
 
-```
-{
-  "cache_size": 4194304
-}
-```
+## Metrics
 
-With the above configuration, the cache will be initialized with
-a size of `cache_size` (in bytes). If this value is too large or too small,
-initialization may fail.
+When `TRITON_ENABLE_METRICS` is enabled in this cache (enabled by default), 
+it will check to see if the running Triton server has metrics enabled as well.
+If so, the cache will publish additional cache-specific metrics to Triton's
+metrics endpoint through the 
+[Custom Metrics API](https://github.com/triton-inference-server/server/blob/main/docs/user_guide/metrics.md#custom-metrics).
+
+### Cache Metrics
+
+The following metrics are reported by this cache implementation:
+
+|Category      |Metric                     |Metric Name                   |Description                                                 |Granularity |Frequency    |
+|--------------|---------------------------|------------------------------|------------------------------------------------------------|------------|-------------|
+|Utilization   |Total Cache Utilization    |`nv_cache_util`               |Total cache utilization rate (0.0 - 1.0)                    |Server-wide |Per interval |
+|Count         |Total Cache Entry Count    |`nv_cache_num_entries`        |Total number of entries stored in cache                     |Server-wide |Per interval |
+|              |Total Cache Lookup Count   |`nv_cache_num_lookups`        |Total number of cache lookups done by Triton                |Server-wide |Per interval |
+|              |Total Cache Hit Count      |`nv_cache_num_hits`           |Total number of cache hits                                  |Server-wide |Per interval |
+|              |Total Cache Miss Count     |`nv_cache_num_misses`         |Total number of cache misses                                |Server-wide |Per interval |
+|              |Total Cache Eviction Count |`nv_cache_num_evictions`      |Total number of cache evictions                             |Server-wide |Per interval |
+|Latency       |Total Cache Lookup Time    |`nv_cache_lookup_duration`    |Cumulative time spent doing cache lookups (microseconds)    |Server-wide |Per interval |
+|              |Total Cache Insertion Time |`nv_cache_insertion_duration` |Cumulative time spent doint cache insertions (microseconds) |Server-wide |Per interval |
+
 
