@@ -237,7 +237,7 @@ LocalCache::Lookup(
 
   // Build TRITONCACHE_CacheEntry from cache representation of entry
   const auto& lentry = iter->second;
-  for (const auto [buffer, attrs] : lentry->buffers_) {
+  for (const auto& [buffer, attrs] : lentry->buffers_) {
     // Triton will copy from passed attrs if needed, so pass as-is for now
     size_t byte_size = 0;
     RETURN_IF_ERROR(
