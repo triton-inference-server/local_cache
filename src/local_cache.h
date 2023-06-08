@@ -50,10 +50,16 @@ using Buffer = std::pair<void*, std::shared_ptr<TRITONSERVER_BufferAttributes>>;
 using Metadata =
     std::tuple<void*, size_t, std::shared_ptr<TRITONSERVER_BufferAttributes>>;
 
+struct LRUIter {
+  // iter won't be valid until set, so track its validity here for convenience
+  bool valid_ = false;
+  std::list<std::string>::iterator iter_;
+};
+
 struct CacheEntry {
   std::vector<Buffer> buffers_;
-  // Point to key in LRU list for maintaining LRU order
-  std::list<std::string>::iterator lru_iter_;
+  // Hold an LRU iterator to perform LRU updates in O(1) time.
+  LRUIter lru_iter_;
 };
 
 struct TritonMetric {
