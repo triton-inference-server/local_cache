@@ -421,18 +421,17 @@ LocalCache::UpdateLRU(
   // NOTE: Unique lock on cache mutex must be held for this function
 
   const auto& key = cache_iter->first;
-  const auto& cache_entry = cache_iter->second;
-  // Remove key from LRU list if it was already in there
-  auto lru_iter = std::find(lru_.begin(), lru_.end(), key);
-  if (lru_iter != lru_.end()) {
-    lru_.erase(lru_iter);
+  const auto& entry = cache_iter->second;
+  // Remove key from LRU list if entry holds valid LRU iterator already
+  if (entry->lru_iter_.valid_ && entry->lru_iter_.iter_ != lru_.end()) {
+    lru_.erase(entry->lru_iter_.iter_);
   }
   // Add key to front of LRU list since it's most recently used
   lru_.push_front(key);
-  // Set CacheEntry LRU iterator to new LRU key location
-  cache_entry->lru_iter_ = lru_.begin();
+  // Set CacheEntry LRU iterator to new LRU key location.
+  entry->lru_iter_.iter_ = lru_.begin();
+  entry->lru_iter_.valid_ = true;
 }
-
 
 // Cache Metric Helpers: these must be protected when accessed
 TRITONSERVER_Error*
