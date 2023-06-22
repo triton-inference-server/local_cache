@@ -25,7 +25,9 @@
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "local_cache.h"
+
 #include <algorithm>
+
 #include "rapidjson/document.h"
 #include "triton/common/logging.h"
 
