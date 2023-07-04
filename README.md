@@ -30,7 +30,7 @@
 
 # Triton Local Cache
 
-This repo contains an example 
+This repo contains an example
 [TRITONCACHE API](https://github.com/triton-inference-server/core/blob/main/include/triton/core/tritoncache.h)
 implementation for caching data locally in-memory.
 
@@ -59,27 +59,27 @@ the build. By default the "main" branch/tag will be used for each repo
 but the following CMake arguments can be used to override.
 
 * triton-inference-server/core: `-D TRITON_CORE_REPO_TAG=[tag]`
-* triton-inference-server/common: `-D TRITON_COMMON_REPO_TAG=[tag]` 
+* triton-inference-server/common: `-D TRITON_COMMON_REPO_TAG=[tag]`
 
-## Configuring the Cache 
+## Configuring the Cache
 
-Like other `TRITONCACHE` implementations, this cache is configured through the 
-`tritonserver --cache-config` CLI arg or through the 
+Like other `TRITONCACHE` implementations, this cache is configured through the
+`tritonserver --cache-config` CLI arg or through the
 `TRITONSERVER_SetCacheConfig` API.
 
 Currently, the following config fields are supported:
-- `size`: The fixed size (in bytes) of CPU memory allocated to the cache 
-upfront. If this value is too large (ex: greater than available memory) or 
+- `size`: The fixed size (in bytes) of CPU memory allocated to the cache
+upfront. If this value is too large (ex: greater than available memory) or
 too small (ex: smaller than required overhead such as ~1-2 KB), initialization
 may fail.
     - example: `tritonserver --cache-config local,size=1048576`
 
 ## Metrics
 
-When `TRITON_ENABLE_METRICS` is enabled in this cache (enabled by default), 
+When `TRITON_ENABLE_METRICS` is enabled in this cache (enabled by default),
 it will check to see if the running Triton server has metrics enabled as well.
 If so, the cache will publish additional cache-specific metrics to Triton's
-metrics endpoint through the 
+metrics endpoint through the
 [Custom Metrics API](https://github.com/triton-inference-server/server/blob/main/docs/user_guide/metrics.md#custom-metrics).
 
 ### Cache Metrics
