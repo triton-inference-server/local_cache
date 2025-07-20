@@ -145,7 +145,8 @@ LocalCache::Allocate(uint64_t byte_size, void** buffer)
 {
   // NOTE: Could have more fine-grained locking, or remove Evict()
   //       from this function and call separately
-  std::unique_lock lk(buffer_mu_);
+  std::unique_lock clk(cache_mu_);
+  std::unique_lock blk(buffer_mu_);
 
   // Requested buffer larger than total buffer
   if (byte_size > managed_buffer_.get_size()) {

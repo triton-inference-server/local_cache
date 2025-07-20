@@ -180,7 +180,7 @@ class LocalCache {
   // Managed buffer
   boost::interprocess::managed_external_buffer managed_buffer_;
   // Protect concurrent cache access
-  std::mutex cache_mu_;
+  std::recursive_mutex cache_mu_;
   // Protect concurrent managed buffer access
   std::mutex buffer_mu_;
   // key -> CacheEntry containing values and list iterator for LRU management
