@@ -60,7 +60,7 @@ bulletins at [https://www.nvidia.com/en-us/security/](https://www.nvidia.com/en-
 **Project:** Triton Local Cache, the in-memory response cache implementation
 for [Triton Inference Server](https://github.com/triton-inference-server/server).
 
-**Software classification:** Library. It is a C++17 shared library
+**Software classification:** Library. It is a C++20 shared library
 (`libtritoncache_local.so`) that Triton Core loads as a cache plugin through
 the `TRITONCACHE_*` C API (`src/cache_api.cc`). It is not a standalone process
 and opens no network listeners, files, or sockets of its own.
@@ -116,10 +116,13 @@ network exposure and inherits the deployment's exposure from the host server.
    entries evicts useful entries and can fail allocation when a single
    response exceeds the cache size or memory is fragmented. Callers must treat
    insert failures as non-fatal and fall back to uncached execution.
-5. **Information disclosure through logs and metrics:** the cache
-   configuration and cache keys appear in log messages, and aggregate
-   utilization, hit, and eviction counters are exported as metrics. Keys
-   derived from request data should not be assumed confidential in logs.
+5. **Information disclosure through logs, errors, and metrics:** the cache
+   configuration and cache keys appear in log messages, and keys also appear
+   verbatim in the error messages returned for lookup misses, duplicate
+   inserts, and failed inserts (`src/local_cache.cc`), so log controls alone
+   do not protect them. Aggregate utilization (a 0.0 to 1.0 ratio), hit, and
+   eviction values are exported as gauge metrics. Keys derived from request
+   data should not be assumed confidential in logs or returned errors.
 6. **Supply-chain risk in build dependencies:** the library builds against
    Boost, RapidJSON, and Triton common and core components. Compromised or
    vulnerable dependency versions would affect the resulting binary.
